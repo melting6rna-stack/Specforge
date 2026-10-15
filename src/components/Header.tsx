@@ -6,7 +6,8 @@ import {
   FolderKanban, 
   FolderSync,
   HardDrive,
-  FolderOpen
+  FolderOpen,
+  Download
 } from 'lucide-react';
 import { ProjectWorkspace } from '../types';
 import { SyncConfig } from '../utils/sharedSyncManager';
@@ -21,6 +22,8 @@ interface HeaderProps {
   syncConfig: SyncConfig;
   onOpenSyncModal: () => void;
   isSyncing: boolean;
+  canInstallPwa?: boolean;
+  onInstallPwa?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -32,7 +35,9 @@ export const Header: React.FC<HeaderProps> = ({
   totalItemsCount,
   syncConfig,
   onOpenSyncModal,
-  isSyncing
+  isSyncing,
+  canInstallPwa,
+  onInstallPwa
 }) => {
   const currentProject = projects.find(p => p.id === activeProjectId) || projects[0];
 
@@ -111,6 +116,19 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Zone 3: Shared Network Sync Status & Project Switcher */}
           <div className="flex items-center gap-2 shrink-0">
+            {/* Desktop App Install Button */}
+            {onInstallPwa && (
+              <button
+                onClick={onInstallPwa}
+                className="flex items-center gap-1.5 text-[11px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md px-2.5 py-1 shadow-2xs transition-colors"
+                title="このアプリをWindows/MacのデスクトップアプリとしてPCに保存 (オフライン起動可能)"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">PCにアプリ保存</span>
+                <span className="sm:hidden">保存</span>
+              </button>
+            )}
+
             {/* Network Sync status badge with click to configure */}
             <button
               onClick={onOpenSyncModal}

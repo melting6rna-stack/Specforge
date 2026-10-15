@@ -8,6 +8,7 @@ import { ItemEditModal } from './components/ItemEditModal';
 import { AuditTrailDrawer } from './components/AuditTrailDrawer';
 import { PdfImportModal } from './components/PdfImportModal';
 import { SharedSyncModal } from './components/SharedSyncModal';
+import { PwaInstallGuideModal } from './components/PwaInstallGuideModal';
 import { EquipmentItem, Category, SpecTemplate, ProjectWorkspace, ChangeLog } from './types';
 import { DEFAULT_TEMPLATES } from './data/defaultTemplates';
 import { INITIAL_PROJECTS, INITIAL_CATEGORIES, INITIAL_ITEMS } from './data/sampleOrders';
@@ -92,8 +93,34 @@ export default function App() {
   const [isPdfImportOpen, setIsPdfImportOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
 
-  // File Handle Ref
-  const activeFileHandleRef = useRef<FileSystemFileHandle | null>(null);
+  // PWA Install prompt state
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
+  const [isPwaGuideOpen, setIsPwaGuideOpen] = useState(false);
+
+  useEffect(() => {
+    const handleBeforeInstall = (e: any) => {
+      e.preventDefault();
+      setDeferredInstallPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+  }, []);
+
+  const handleInstallPwa = async () => {
+    if (deferredInstallPrompt) {
+      try {
+        deferredInstallPrompt.prompt();
+        const { outcome } = await deferredInstallPrompt.userChoice;
+        if (outcome === 'accepted') {
+          setDeferredInstallPrompt(null);
+          return;
+        }
+      } catch (e) {
+        // Fallback to guide
+      }
+    }
+    setIsPwaGuideOpen(true);
+  };
 
   // Save to localStorage automatically (100% offline persistence)
   useEffect(() => {
@@ -108,9 +135,8 @@ export default function App() {
     localStorage.setItem('specforge_items_v2', JSON.stringify(items));
   }, [items]);
 
-  useEffect(() => {
-    localStorage.setItem('specforge_templates_v2', JSON.stringify(templates));
-  }, [templates]);
+  // File Handle Ref
+  const activeFileHandleRef = useRef<FileSystemFileHandle | null>(null);
 
   // Synchronize with shared network source (either file handle or URL)
   const performSync = useCallback(async (isAuto = false) => {
@@ -452,6 +478,8 @@ export default function App() {
         syncConfig={syncConfig}
         onOpenSyncModal={() => setIsSyncModalOpen(true)}
         isSyncing={isSyncing}
+        canInstallPwa={!!deferredInstallPrompt}
+        onInstallPwa={handleInstallPwa}
       />
 
       {/* Auto-Sync Notification Banner */}
@@ -568,6 +596,14 @@ export default function App() {
         onTriggerManualSync={() => performSync(false)}
         lastSyncTime={lastSyncTime}
         isSyncing={isSyncing}
+      />
+
+      {/* PWA Desktop Install Guide Modal */}
+      <PwaInstallGuideModal
+        isOpen={isPwaGuideOpen}
+        onClose={() => setIsPwaGuideOpen(false)}
+        onTriggerInstall={handleInstallPwa}
+        canDirectInstall={!!deferredInstallPrompt}
       />
 
       {/* Footer */}
