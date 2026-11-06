@@ -1,0 +1,597 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/tokki-equipment-v1.1.schema.json",
+  "title": "特記仕様書 作業用機器データ (v1.1 改定版)",
+  "description": "1冊の特記仕様書を読み込み、機器仕様を確認・修正し、Excel/Word等へ書き出すための中間データ形式。塗装仕様(coating)、変更履歴(history)、案件カテゴリ定義を追加対応。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "document",
+    "equipment"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": [
+        "1.0",
+        "1.1"
+      ],
+      "default": "1.1"
+    },
+    "document": {
+      "$ref": "#/$defs/document"
+    },
+    "equipment": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/equipment"
+      },
+      "default": []
+    },
+    "categories": {
+      "type": "array",
+      "description": "本案件固有の機器カテゴリ一覧 (例: [\"弁類\", \"ポンプ\", \"配管機器\"])",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    }
+  },
+  "$defs": {
+    "nullableString": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "nullableNumber": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "document": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "document_id",
+        "file_name",
+        "project_name",
+        "document_type",
+        "status",
+        "updated_at"
+      ],
+      "properties": {
+        "document_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "案件コード・仕様書番号 (例: PRJ-2026-001)"
+        },
+        "file_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "元資料・仕様書ファイル名"
+        },
+        "project_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "案件名・工事名"
+        },
+        "document_type": {
+          "type": "string",
+          "default": "特記仕様書"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "編集中",
+            "確認中",
+            "確認済",
+            "完了"
+          ]
+        },
+        "categories": {
+          "type": "array",
+          "description": "本案件固有の機器カテゴリ一覧 (例: [\"弁類\", \"ポンプ\", \"計装品\"])",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "updated_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "equipment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "category",
+        "action",
+        "purpose",
+        "quantity",
+        "specifications",
+        "coating",
+        "materials",
+        "accessories",
+        "requirements",
+        "remarks",
+        "history",
+        "unclassified",
+        "source",
+        "edit"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^EQ-[0-9]{3,}$",
+          "description": "機器タグ番号 (例: EQ-001, EQ-012)"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "機器名 (例: 手動バタフライ弁, 高圧渦巻ポンプ)"
+        },
+        "category": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "案件内の分類カテゴリ (例: 弁類, ポンプ, 配管機器, タンク)"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "更新",
+            "新設",
+            "撤去",
+            "移設",
+            "既設利用",
+            "仮設",
+            "その他"
+          ]
+        },
+        "purpose": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "機器の用途 (例: 薬品注入用, 系統遮断用)"
+        },
+        "quantity": {
+          "$ref": "#/$defs/quantity"
+        },
+        "specifications": {
+          "type": "array",
+          "description": "機器仕様リスト (口径, 出力, 流量, 揚程, 最高使用圧力, 電圧等)。手動追加項目もここに格納される。",
+          "items": {
+            "$ref": "#/$defs/specification"
+          },
+          "default": []
+        },
+        "coating": {
+          "$ref": "#/$defs/coating"
+        },
+        "materials": {
+          "type": "array",
+          "description": "材質指定 (部品ごとの材質)",
+          "items": {
+            "$ref": "#/$defs/material"
+          },
+          "default": []
+        },
+        "accessories": {
+          "type": "array",
+          "description": "付属品・予備品リスト",
+          "items": {
+            "$ref": "#/$defs/accessory"
+          },
+          "default": []
+        },
+        "requirements": {
+          "type": "array",
+          "description": "適合規格・製作・施工・塗装要求",
+          "items": {
+            "$ref": "#/$defs/requirement"
+          },
+          "default": []
+        },
+        "remarks": {
+          "type": "array",
+          "description": "特記事項・備考",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "history": {
+          "type": "array",
+          "description": "機器の仕様・数量等の変更履歴ログ",
+          "items": {
+            "$ref": "#/$defs/historyItem"
+          },
+          "default": []
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "edit": {
+          "$ref": "#/$defs/edit"
+        },
+        "unclassified": {
+          "type": "array",
+          "description": "既存フィールドへの分類を確定できないが、原文から保持すべき情報。",
+          "items": {
+            "$ref": "#/$defs/unclassifiedItem"
+          },
+          "default": []
+        }
+      }
+    },
+    "quantity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "unit",
+        "note",
+        "original_text"
+      ],
+      "properties": {
+        "value": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "original_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "specification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item",
+        "value",
+        "unit",
+        "note"
+      ],
+      "properties": {
+        "item": {
+          "type": "string",
+          "minLength": 1,
+          "description": "仕様項目名 (例: 口径, 吐出量, 全揚程, 出力, 電圧, 最高使用圧力, 耐圧, 塗装仕様 等)"
+        },
+        "value": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ],
+          "description": "数値または値 (例: 50, 7.5, 100, SUS304, エポキシ樹脂塗装)"
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "単位 (例: A, kW, m³/h, m, MPa, V等。単位がない場合はnull)"
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "特記事項・補足"
+        }
+      }
+    },
+    "coating": {
+      "type": "object",
+      "description": "機器の塗装・防食仕様。特記仕様書に塗装についての記載がある場合は必ずここに格納する。",
+      "additionalProperties": false,
+      "required": [
+        "specification",
+        "color",
+        "target_part",
+        "note"
+      ],
+      "properties": {
+        "specification": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "塗装仕様・塗料種別 (例: エポキシ樹脂粉体塗装, ウレタン樹脂塗料, 変性エポキシ, 耐熱塗料, メーカー標準塗装)"
+        },
+        "color": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "指定塗色・マンセル記号 (例: 5Y7/1, 2.5G7/2, N-7, メーカー標準色)"
+        },
+        "target_part": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "塗装対象部位 (例: 内面, 外面, 全面, 接液部外側)"
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "膜厚指定や特記事項 (例: 膜厚200μm以上, 水道用無毒性適合)"
+        }
+      }
+    },
+    "material": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "part",
+        "value",
+        "condition",
+        "note"
+      ],
+      "properties": {
+        "part": {
+          "type": "string",
+          "minLength": 1,
+          "description": "部品名 (例: 本体, 弁箱, 弁体, インペラ, ケーシング, シャフト)"
+        },
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "材質記号 (例: SCS13, SUS304, FC200, FCD450)"
+        },
+        "condition": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "accessory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "quantity",
+        "unit",
+        "note"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "quantity": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "text"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "適合要求",
+            "製作要求",
+            "施工要求",
+            "性能要求",
+            "検査要求",
+            "塗装要求",
+            "その他"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "historyItem": {
+      "type": "object",
+      "description": "機器の仕様・数量・カテゴリ等の変更履歴レコード",
+      "additionalProperties": false,
+      "required": [
+        "timestamp",
+        "fieldLabel",
+        "oldValue",
+        "newValue"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "変更日時 (例: 2026/11/05 17:30)"
+        },
+        "author": {
+          "type": "string",
+          "description": "変更者・操作区分 (例: 担当者手動, Excel取込)"
+        },
+        "field": {
+          "type": "string",
+          "description": "変更項目キー (例: quantity, diameter, category, specs)"
+        },
+        "fieldLabel": {
+          "type": "string",
+          "description": "表示名 (例: 数量, 口径, 所属カテゴリ, 塗装仕様)"
+        },
+        "oldValue": {
+          "type": "string",
+          "description": "変更前の値"
+        },
+        "newValue": {
+          "type": "string",
+          "description": "変更後の値"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "変更理由"
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "page_start",
+        "page_end",
+        "section",
+        "original_text"
+      ],
+      "properties": {
+        "page_start": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "page_end": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "section": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "original_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "edit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "modified",
+        "modified_at"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "未確認",
+            "要確認",
+            "確認済"
+          ]
+        },
+        "modified": {
+          "type": "boolean"
+        },
+        "modified_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "unclassifiedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "page",
+        "reason"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "page": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

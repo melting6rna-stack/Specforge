@@ -1,0 +1,457 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/tokki-equipment.schema.json",
+  "title": "特記仕様書 作業用機器データ",
+  "description": "1冊の特記仕様書を読み込み、機器仕様を確認・修正し、Excel/Word等へ書き出すための中間データ形式。分類不能な原文情報はunclassifiedに保持する。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "document",
+    "equipment"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "document": {
+      "$ref": "#/$defs/document"
+    },
+    "equipment": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/equipment"
+      },
+      "default": []
+    }
+  },
+  "$defs": {
+    "nullableString": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "nullableNumber": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "document": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "document_id",
+        "file_name",
+        "project_name",
+        "document_type",
+        "status",
+        "updated_at"
+      ],
+      "properties": {
+        "document_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "file_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "project_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "document_type": {
+          "type": "string",
+          "default": "特記仕様書"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "編集中",
+            "確認中",
+            "確認済",
+            "完了"
+          ]
+        },
+        "updated_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "equipment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "category",
+        "action",
+        "purpose",
+        "quantity",
+        "specifications",
+        "materials",
+        "accessories",
+        "requirements",
+        "remarks",
+        "unclassified",
+        "source",
+        "edit"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^EQ-[0-9]{3,}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "更新",
+            "新設",
+            "撤去",
+            "移設",
+            "既設利用",
+            "仮設",
+            "その他"
+          ]
+        },
+        "purpose": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quantity": {
+          "$ref": "#/$defs/quantity"
+        },
+        "specifications": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/specification"
+          },
+          "default": []
+        },
+        "materials": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/material"
+          },
+          "default": []
+        },
+        "accessories": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/accessory"
+          },
+          "default": []
+        },
+        "requirements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/requirement"
+          },
+          "default": []
+        },
+        "remarks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "edit": {
+          "$ref": "#/$defs/edit"
+        },
+        "unclassified": {
+          "type": "array",
+          "description": "既存フィールドへの分類を確定できないが、原文から保持すべき情報。AIは推測で分類せずここへ格納する。",
+          "items": {
+            "$ref": "#/$defs/unclassifiedItem"
+          },
+          "default": []
+        }
+      }
+    },
+    "quantity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "unit",
+        "note",
+        "original_text"
+      ],
+      "properties": {
+        "value": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "original_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "specification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item",
+        "value",
+        "unit",
+        "note"
+      ],
+      "properties": {
+        "item": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "material": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "part",
+        "value",
+        "condition",
+        "note"
+      ],
+      "properties": {
+        "part": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "condition": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "accessory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "quantity",
+        "unit",
+        "note"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "quantity": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "text"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "適合要求",
+            "製作要求",
+            "施工要求",
+            "性能要求",
+            "検査要求",
+            "その他"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "page_start",
+        "page_end",
+        "section",
+        "original_text"
+      ],
+      "properties": {
+        "page_start": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "page_end": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "section": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "original_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "edit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "modified",
+        "modified_at"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "未確認",
+            "要確認",
+            "確認済"
+          ]
+        },
+        "modified": {
+          "type": "boolean"
+        },
+        "modified_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "unclassifiedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "page",
+        "reason"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "page": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

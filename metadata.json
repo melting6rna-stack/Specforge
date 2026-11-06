@@ -1,0 +1,6 @@
+{
+  "name": "SpecForge - 仕様書作成＆発注管理システム",
+  "description": "発注資料の取込・データベース化から、品目に応じた自動テンプレート判定、変更履歴管理、リアルタイム仕様書プレビュー、Excel出力までを一気通貫で行う業務仕様書作成アプリケーション。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
