@@ -1002,6 +1002,7 @@ export default function App() {
             onImportProjectBackup={handleImportProjectBackup}
             onSwitchToDatabase={() => setActiveTab('database')}
             isSyncing={isSyncing}
+            onInstallPwa={handleInstallPwa}
           />
         )}
 

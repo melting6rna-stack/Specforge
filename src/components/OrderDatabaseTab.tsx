@@ -342,8 +342,8 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Manual JSON Save Button */}
-          {hasUnsavedChanges ? (
+          {/* Manual JSON Save Button (Only shown when changes are unsaved) */}
+          {hasUnsavedChanges && (
             <button
               onClick={onManualSaveJson}
               disabled={isSavingJson}
@@ -352,16 +352,6 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
             >
               <Save className={`w-3.5 h-3.5 ${isSavingJson ? 'animate-spin' : ''}`} />
               <span>未保存の変更あり（JSONに保存）</span>
-            </button>
-          ) : (
-            <button
-              onClick={onManualSaveJson}
-              disabled={isSavingJson}
-              className="px-3 py-1.5 text-xs font-medium text-emerald-800 bg-emerald-50 border border-emerald-300 hover:bg-emerald-100 rounded-md shadow-2xs flex items-center gap-1.5 transition-colors cursor-pointer"
-              title="現在の状態はJSONファイルに保存済みです（クリックで再保存も可能）"
-            >
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              <span>JSON保存済み</span>
             </button>
           )}
 

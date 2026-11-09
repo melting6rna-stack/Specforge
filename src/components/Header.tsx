@@ -98,18 +98,6 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             <button
-              onClick={() => onTabChange('templates')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 ${
-                activeTab === 'templates'
-                  ? 'bg-slate-900 text-white font-semibold'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              }`}
-            >
-              <Settings2 className="w-3.5 h-3.5" />
-              <span>マッピング設定 (管理者)</span>
-            </button>
-
-            <button
               onClick={() => onTabChange('projects')}
               className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 ${
                 activeTab === 'projects'
@@ -124,19 +112,6 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Zone 3: Linked Project JSON Status & Project Switcher */}
           <div className="flex items-center gap-2 shrink-0">
-            {/* Desktop App Install Button */}
-            {onInstallPwa && (
-              <button
-                onClick={onInstallPwa}
-                className="flex items-center gap-1.5 text-[11px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md px-2.5 py-1 shadow-2xs transition-colors"
-                title="このアプリをWindows/MacのデスクトップアプリとしてPCに保存 (オフライン起動可能)"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">PCにアプリ保存</span>
-                <span className="sm:hidden">保存</span>
-              </button>
-            )}
-
             {/* Unsaved Changes Save Button (Global across all tabs) */}
             {hasUnsavedChanges && (
               <button
@@ -175,17 +150,7 @@ export const Header: React.FC<HeaderProps> = ({
                   <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
                 </button>
               </div>
-            ) : (
-              <button
-                onClick={onRelinkFile}
-                className="flex items-center gap-1.5 text-[11px] font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-md px-2.5 py-1 shadow-2xs transition-colors"
-                title="この案件にJSONファイルを紐づけてデータベース化する"
-              >
-                <FileCode className="w-3.5 h-3.5 text-slate-400" />
-                <span className="hidden sm:inline">JSON紐づけ</span>
-                <span className="sm:hidden">紐づけ</span>
-              </button>
-            )}
+            ) : null}
 
             {/* Project Switcher */}
             <div className="hidden md:flex items-center gap-1 text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-md px-2 py-1">
