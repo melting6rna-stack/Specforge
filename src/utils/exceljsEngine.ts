@@ -436,51 +436,100 @@ export interface RenderedCellData {
   value: string;
   isBold?: boolean;
   fontSize?: number;
+  fontColor?: string;
   align?: 'left' | 'center' | 'right';
   bgColor?: string;
   hasBorder?: boolean;
+  isMergedChild?: boolean;
+  colSpan?: number;
+  rowSpan?: number;
+  isMapped?: boolean;
+  mappedFieldId?: string;
+  mappedFieldLabel?: string;
 }
 
 export interface RenderedSheetGrid {
   sheetName: string;
+  availableSheets: string[];
   columns: { colLetter: string; width: number }[];
   rows: {
     rowNumber: number;
+    height?: number;
     cells: RenderedCellData[];
   }[];
   totalCells: number;
   benchmarkMs: number;
 }
 
+function parseCellAddress(addr: string): { col: number; row: number } | null {
+  const match = addr.match(/^([A-Z]+)([0-9]+)$/i);
+  if (!match) return null;
+  const letters = match[1].toUpperCase();
+  let col = 0;
+  for (let i = 0; i < letters.length; i++) {
+    col = col * 26 + (letters.charCodeAt(i) - 64);
+  }
+  const row = parseInt(match[2], 10);
+  return { col, row };
+}
+
+function colIndexToLetter(colIndex: number): string {
+  let temp = colIndex;
+  let letter = '';
+  while (temp > 0) {
+    const rem = (temp - 1) % 26;
+    letter = String.fromCharCode(65 + rem) + letter;
+    temp = Math.floor((temp - 1) / 26);
+  }
+  return letter;
+}
+
+interface MergeRangeInfo {
+  top: number;
+  left: number;
+  bottom: number;
+  right: number;
+  colSpan: number;
+  rowSpan: number;
+  masterAddress: string;
+}
+
 /**
  * Real-time In-Memory Excel Renderer:
  * Evaluates template updates in memory using ExcelJS on every keystroke/change,
- * analyzes cell matrices, styles, and values, and returns grid representation with benchmark time.
+ * analyzes cell matrices, merges, styles, and values, and returns grid representation with benchmark time.
  */
 export async function renderSpecificationExcelGrid(
   template: SpecTemplate,
   formValues: Record<string, any>,
   items: EquipmentItem[],
   docInfo: Record<string, string>,
-  maxRows: number = 28
+  targetSheetOverride?: string
 ): Promise<RenderedSheetGrid> {
   const startTime = performance.now();
 
   const workbook = new ExcelJS.Workbook();
-  if (template.rawWorkbookBase64 || template.masterWorkbookBase64) {
-    const base64 = template.rawWorkbookBase64 || template.masterWorkbookBase64!;
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
+  const rawBase64 = template.rawWorkbookBase64 || template.masterWorkbookBase64;
+  if (rawBase64) {
+    try {
+      const binary = atob(rawBase64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      await workbook.xlsx.load(bytes.buffer.slice(0));
+    } catch (e) {
+      console.warn('Failed to load rawWorkbookBase64, falling back to default', e);
+      const defaultBuffer = await createDefaultMasterWorkbook(template);
+      await workbook.xlsx.load(defaultBuffer);
     }
-    await workbook.xlsx.load(bytes.buffer.slice(0));
   } else {
     const defaultBuffer = await createDefaultMasterWorkbook(template);
     await workbook.xlsx.load(defaultBuffer);
   }
 
-  const targetSheetName = template.tableMapping?.targetSheetName;
+  const availableSheets = workbook.worksheets.map(w => w.name);
+  const targetSheetName = targetSheetOverride || template.tableMapping?.targetSheetName;
   const worksheet = targetSheetName 
     ? (workbook.getWorksheet(targetSheetName) || workbook.worksheets[0]) 
     : workbook.worksheets[0];
@@ -491,9 +540,13 @@ export async function renderSpecificationExcelGrid(
 
   // 1. Inject Fields
   const fields = template.fields || [];
+  const fieldMappingMap: Record<string, { id: string; label: string }> = {};
   for (const field of fields) {
     if (!field.cell) continue;
-    const cell = worksheet.getCell(field.cell.trim().toUpperCase());
+    const cleanAddr = field.cell.trim().toUpperCase();
+    fieldMappingMap[cleanAddr] = { id: field.id, label: field.label };
+
+    const cell = worksheet.getCell(cleanAddr);
     const rawVal = formValues[field.id];
     if (field.type === 'checkbox') {
       const isChecked = Boolean(rawVal);
@@ -511,7 +564,11 @@ export async function renderSpecificationExcelGrid(
   if (template.cellMappings) {
     for (const cm of template.cellMappings) {
       if (!cm.cell || !cm.fieldKey) continue;
-      const cell = worksheet.getCell(cm.cell.trim().toUpperCase());
+      const cleanAddr = cm.cell.trim().toUpperCase();
+      if (!fieldMappingMap[cleanAddr]) {
+        fieldMappingMap[cleanAddr] = { id: cm.fieldKey, label: cm.label || cm.fieldKey };
+      }
+      const cell = worksheet.getCell(cleanAddr);
       const val = docInfo[cm.fieldKey];
       if (val !== undefined && val !== null) {
         cell.value = val;
@@ -539,20 +596,131 @@ export async function renderSpecificationExcelGrid(
     });
   }
 
-  // Build grid data for browser Excel viewer (Columns A to H)
-  const colLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
-  const colWidths = [36, 110, 190, 120, 100, 75, 110, 190];
-  const columns = colLetters.map((c, i) => ({ colLetter: c, width: colWidths[i] }));
+  // 4. Parse Merged Cells
+  const mergeList: MergeRangeInfo[] = [];
+  const rawMerges: string[] = [];
+  if (Array.isArray((worksheet as any).model?.merges)) {
+    rawMerges.push(...(worksheet as any).model.merges);
+  }
+  if ((worksheet as any)._merges) {
+    const mObj = (worksheet as any)._merges;
+    if (Array.isArray(mObj)) {
+      rawMerges.push(...mObj.map((m: any) => typeof m === 'string' ? m : m?.range || ''));
+    } else if (typeof mObj === 'object') {
+      for (const k of Object.keys(mObj)) {
+        rawMerges.push(k);
+      }
+    }
+  }
 
-  const rows: { rowNumber: number; cells: RenderedCellData[] }[] = [];
+  const uniqueMerges = Array.from(new Set(rawMerges)).filter(Boolean);
+  for (const mStr of uniqueMerges) {
+    const parts = mStr.split(':');
+    if (parts.length === 2) {
+      const s = parseCellAddress(parts[0]);
+      const e = parseCellAddress(parts[1]);
+      if (s && e) {
+        mergeList.push({
+          top: Math.min(s.row, e.row),
+          left: Math.min(s.col, e.col),
+          bottom: Math.max(s.row, e.row),
+          right: Math.max(s.col, e.col),
+          colSpan: Math.abs(e.col - s.col) + 1,
+          rowSpan: Math.abs(e.row - s.row) + 1,
+          masterAddress: `${colIndexToLetter(Math.min(s.col, e.col))}${Math.min(s.row, e.row)}`
+        });
+      }
+    }
+  }
+
+  // 5. Determine sheet boundaries (columns and rows)
+  let maxColIndex = 8; // At least H
+  let maxRowIndex = 28; // At least 28 rows
+
+  if (worksheet.dimensions) {
+    try {
+      const dims = worksheet.dimensions as any;
+      if (typeof dims.bottom === 'number' && typeof dims.right === 'number') {
+        maxColIndex = Math.max(maxColIndex, dims.right);
+        maxRowIndex = Math.max(maxRowIndex, dims.bottom);
+      } else {
+        const dimStr = String(dims?.range || dims);
+        const dMatch = dimStr.match(/([A-Z]+[0-9]+):([A-Z]+[0-9]+)/i);
+        if (dMatch) {
+          const bottomEnd = parseCellAddress(dMatch[2]);
+          if (bottomEnd) {
+            maxColIndex = Math.max(maxColIndex, bottomEnd.col);
+            maxRowIndex = Math.max(maxRowIndex, bottomEnd.row);
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  for (const f of fields) {
+    if (f.cell) {
+      const parsed = parseCellAddress(f.cell);
+      if (parsed) {
+        maxColIndex = Math.max(maxColIndex, parsed.col);
+        maxRowIndex = Math.max(maxRowIndex, parsed.row);
+      }
+    }
+  }
+
+  worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    maxRowIndex = Math.max(maxRowIndex, rowNumber);
+    row.eachCell({ includeEmpty: false }, (_cell, colNumber) => {
+      maxColIndex = Math.max(maxColIndex, colNumber);
+    });
+  });
+
+  maxColIndex = Math.min(Math.max(maxColIndex, 8), 26); // Min H (8), Max Z (26)
+  maxRowIndex = Math.min(Math.max(maxRowIndex, 28), 90);  // Min 28, Max 90
+
+  // Build columns definition
+  const columns: { colLetter: string; width: number }[] = [];
+  for (let c = 1; c <= maxColIndex; c++) {
+    const colLetter = colIndexToLetter(c);
+    const colObj = worksheet.getColumn(c);
+    let width = 95;
+    if (c === 1 && (!colObj.width || colObj.width <= 6)) {
+      width = 40;
+    } else if (colObj && colObj.width) {
+      width = Math.round(colObj.width * 7.5 + 16);
+      width = Math.max(45, Math.min(width, 320));
+    }
+    columns.push({ colLetter, width });
+  }
+
+  // 6. Build rows & cell matrices
+  const rows: { rowNumber: number; height?: number; cells: RenderedCellData[] }[] = [];
   let cellCount = 0;
 
-  for (let r = 1; r <= maxRows; r++) {
+  for (let r = 1; r <= maxRowIndex; r++) {
     const rowCells: RenderedCellData[] = [];
-    for (const c of colLetters) {
-      const addr = `${c}${r}`;
+    const excelRow = worksheet.getRow(r);
+    const rowHeight = excelRow.height ? Math.round(excelRow.height * 1.33) : undefined;
+
+    for (let c = 1; c <= maxColIndex; c++) {
+      const colLetter = colIndexToLetter(c);
+      const addr = `${colLetter}${r}`;
       const cell = worksheet.getCell(addr);
       cellCount++;
+
+      // Check merge status
+      let isMergedChild = false;
+      let colSpan: number | undefined = undefined;
+      let rowSpan: number | undefined = undefined;
+
+      const mergeInfo = mergeList.find(m => c >= m.left && c <= m.right && r >= m.top && r <= m.bottom);
+      if (mergeInfo) {
+        if (addr === mergeInfo.masterAddress) {
+          colSpan = mergeInfo.colSpan;
+          rowSpan = mergeInfo.rowSpan;
+        } else {
+          isMergedChild = true;
+        }
+      }
 
       let displayVal = '';
       if (cell.value !== null && cell.value !== undefined) {
@@ -574,10 +742,20 @@ export async function renderSpecificationExcelGrid(
       // Extract colors
       let bgColor: string | undefined;
       const fill = cell.fill as any;
-      if (fill && fill.fgColor && fill.fgColor.argb) {
-        const argb = String(fill.fgColor.argb);
+      if (fill && fill.fgColor) {
+        const argb = String(fill.fgColor.argb || fill.fgColor.theme || '');
         if (argb.length === 8) {
           bgColor = `#${argb.slice(2)}`;
+        } else if (argb.length === 6) {
+          bgColor = `#${argb}`;
+        }
+      }
+
+      let fontColor: string | undefined;
+      if (cell.font && cell.font.color) {
+        const cArgb = String(cell.font.color.argb || '');
+        if (cArgb.length === 8) {
+          fontColor = `#${cArgb.slice(2)}`;
         }
       }
 
@@ -586,28 +764,45 @@ export async function renderSpecificationExcelGrid(
       const align = (cell.alignment && cell.alignment.horizontal as any) || (typeof cell.value === 'number' ? 'right' : 'left');
       const hasBorder = Boolean(cell.border && (cell.border.top || cell.border.bottom || cell.border.left || cell.border.right));
 
+      // Field mapping tag
+      const mapped = fieldMappingMap[addr];
+
       rowCells.push({
         address: addr,
-        col: c,
+        col: colLetter,
         row: r,
         value: displayVal,
         isBold,
         fontSize,
+        fontColor,
         align,
         bgColor,
-        hasBorder
+        hasBorder,
+        isMergedChild,
+        colSpan,
+        rowSpan,
+        isMapped: Boolean(mapped),
+        mappedFieldId: mapped?.id,
+        mappedFieldLabel: mapped?.label
       });
     }
-    rows.push({ rowNumber: r, cells: rowCells });
+
+    rows.push({
+      rowNumber: r,
+      height: rowHeight,
+      cells: rowCells
+    });
   }
 
   const benchmarkMs = Math.round((performance.now() - startTime) * 10) / 10;
 
   return {
     sheetName: worksheet.name,
+    availableSheets,
     columns,
     rows,
     totalCells: cellCount,
     benchmarkMs
   };
 }
+

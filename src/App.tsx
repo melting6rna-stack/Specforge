@@ -102,6 +102,15 @@ export default function App() {
     return DEFAULT_TEMPLATES;
   });
 
+  // Persist templates to localStorage whenever updated
+  useEffect(() => {
+    try {
+      localStorage.setItem('specforge_templates_v2', JSON.stringify(templates));
+    } catch (e) {
+      console.warn('Failed to save templates to localStorage', e);
+    }
+  }, [templates]);
+
   // Sync state
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncNotice, setSyncNotice] = useState<string>('');
@@ -965,6 +974,7 @@ export default function App() {
             activeProjectId={activeProjectId}
             currentProject={currentProject}
             onOpenAdminMapping={() => setActiveTab('templates')}
+            onUpdateTemplates={setTemplates}
           />
         )}
 

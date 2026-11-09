@@ -155,29 +155,33 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
         }
         const base64 = btoa(binary);
 
+        const targetId = editingTemplate ? editingTemplate.id : selectedTemplateId;
+        const updated = templates.map(t => {
+          if (t.id === targetId) {
+            return {
+              ...(editingTemplate && editingTemplate.id === t.id ? editingTemplate : t),
+              masterFileName: file.name,
+              masterWorkbookBase64: base64,
+              rawWorkbookBase64: base64,
+              updatedAt: new Date().toISOString().slice(0, 10)
+            };
+          }
+          return t;
+        });
+
+        onUpdateTemplates(updated);
+
         if (editingTemplate) {
           setEditingTemplate({
             ...editingTemplate,
             masterFileName: file.name,
             masterWorkbookBase64: base64,
-            rawWorkbookBase64: base64
+            rawWorkbookBase64: base64,
+            updatedAt: new Date().toISOString().slice(0, 10)
           });
-        } else {
-          const updated = templates.map(t => {
-            if (t.id === selectedTemplateId) {
-              return {
-                ...t,
-                masterFileName: file.name,
-                masterWorkbookBase64: base64,
-                rawWorkbookBase64: base64
-              };
-            }
-            return t;
-          });
-          onUpdateTemplates(updated);
         }
 
-        setMessage(`マスター雛形Excel「${file.name}」を取り込みました。ExcelJSによる書式保持流し込みが有効です。`);
+        setMessage(`マスター雛形Excel「${file.name}」を取り込み、設定を即時保存しました。直接描画ビューに反映されます。`);
         setTimeout(() => setMessage(''), 5000);
       } catch (err: any) {
         setErrorMessage(`マスター雛形の読み込みに失敗しました: ${err.message}`);
