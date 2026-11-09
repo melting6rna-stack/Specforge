@@ -983,6 +983,9 @@ export default function App() {
           <TemplateAdminTab
             templates={templates}
             onUpdateTemplates={setTemplates}
+            items={items}
+            currentProject={currentProject}
+            onBackToDashboard={() => setActiveTab('spec_studio')}
           />
         )}
 

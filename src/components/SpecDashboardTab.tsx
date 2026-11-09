@@ -1,36 +1,24 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   FileText, 
   Download, 
-  Printer, 
-  Check, 
-  Eye, 
   ZoomIn, 
   ZoomOut, 
   Settings2,
   CheckSquare,
   Square,
-  Layers,
-  ChevronDown,
-  Info,
-  SlidersHorizontal,
-  FolderOpen,
-  Calendar,
-  Sparkles,
-  Zap,
   RefreshCw,
-  Table,
   Cpu,
-  ArrowRight,
   Lock,
-  ExternalLink,
   Tag,
-  Upload,
   FileSpreadsheet,
-  Edit3
+  FileCheck2,
+  Eye,
+  Layers
 } from 'lucide-react';
 import { EquipmentItem, SpecTemplate, Category, SpecFieldMapping, ProjectWorkspace } from '../types';
 import { downloadSpecificationExcel, renderSpecificationExcelGrid, RenderedSheetGrid } from '../utils/exceljsEngine';
+import { convertElementToPdfBlob } from '../utils/pdfGenerator';
 
 interface SpecDashboardTabProps {
   items: EquipmentItem[];
@@ -63,12 +51,23 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   // Primary focused equipment for specification transfers
   const [primaryItemId, setPrimaryItemId] = useState<string>('');
+  // Item selection for adding multiple equipment
+  const [itemToAddId, setItemToAddId] = useState<string>('');
 
   useEffect(() => {
-    const ids = projectItems.map(it => it.id);
-    setSelectedItemIds(ids);
-    if (ids.length > 0 && !primaryItemId) {
-      setPrimaryItemId(ids[0]);
+    if (projectItems.length > 0) {
+      if (selectedItemIds.length === 0) {
+        setSelectedItemIds([projectItems[0].id]);
+        setPrimaryItemId(projectItems[0].id);
+      } else {
+        const validIds = selectedItemIds.filter(id => projectItems.some(it => it.id === id));
+        if (validIds.length === 0) {
+          setSelectedItemIds([projectItems[0].id]);
+          setPrimaryItemId(projectItems[0].id);
+        } else if (!validIds.includes(primaryItemId)) {
+          setPrimaryItemId(validIds[0]);
+        }
+      }
     }
   }, [projectItems]);
 
@@ -76,9 +75,29 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
     return projectItems.filter(it => selectedItemIds.includes(it.id));
   }, [projectItems, selectedItemIds]);
 
+  const unselectedItems = useMemo(() => {
+    return projectItems.filter(it => !selectedItemIds.includes(it.id));
+  }, [projectItems, selectedItemIds]);
+
   const primaryItem = useMemo(() => {
     return projectItems.find(it => it.id === primaryItemId) || activeItems[0] || projectItems[0];
   }, [projectItems, primaryItemId, activeItems]);
+
+  const handleAddEquipment = () => {
+    if (!itemToAddId) return;
+    setSelectedItemIds(prev => [...prev, itemToAddId]);
+    setItemToAddId('');
+  };
+
+  const handleRemoveEquipment = (idToRemove: string) => {
+    setSelectedItemIds(prev => prev.filter(id => id !== idToRemove));
+    if (primaryItemId === idToRemove) {
+      const remaining = selectedItemIds.filter(id => id !== idToRemove);
+      if (remaining.length > 0) {
+        setPrimaryItemId(remaining[0]);
+      }
+    }
+  };
 
   // Form Values State (Keyed by field.id)
   const [formValues, setFormValues] = useState<Record<string, any>>({});
@@ -93,8 +112,13 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
   const [selectedCellAddress, setSelectedCellAddress] = useState<string>('B2');
   const [selectedSheetOverride, setSelectedSheetOverride] = useState<string>('');
   const [focusedFieldId, setFocusedFieldId] = useState<string | null>(null);
-  const [directUploadNotice, setDirectUploadNotice] = useState<string>('');
-  const masterExcelInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  // PDF Preview State & Offscreen A4 Reference
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState<boolean>(false);
+  const [previewMode, setPreviewMode] = useState<'pdf' | 'excel'>('pdf');
+  const [pdfNotice, setPdfNotice] = useState<string>('');
+  const specSheetRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-calculated document number: semi-fixed based on project code and equipment tag
   const fixedDocNo = useMemo(() => {
@@ -276,51 +300,6 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
     }
   };
 
-  // Direct Excel master template upload handler
-  const handleDirectUploadMasterExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const buffer = evt.target?.result as ArrayBuffer;
-        const bytes = new Uint8Array(buffer);
-        let binary = '';
-        for (let i = 0; i < bytes.byteLength; i++) {
-          binary += String.fromCharCode(bytes[i]);
-        }
-        const base64 = btoa(binary);
-
-        const updated = templates.map(t => {
-          if (t.id === selectedTemplateId) {
-            return {
-              ...t,
-              masterFileName: file.name,
-              masterWorkbookBase64: base64,
-              rawWorkbookBase64: base64,
-              updatedAt: new Date().toISOString().slice(0, 10)
-            };
-          }
-          return t;
-        });
-
-        if (onUpdateTemplates) {
-          onUpdateTemplates(updated);
-        }
-
-        setDirectUploadNotice(`雛形Excel「${file.name}」を取り込みました。直接描画ビューに即時反映されました。`);
-        setTimeout(() => setDirectUploadNotice(''), 5000);
-        setSelectedSheetOverride('');
-        setRenderCounter(c => c + 1);
-      } catch (err: any) {
-        setDirectUploadNotice(`読込エラー: ${err.message}`);
-      }
-    };
-    reader.readAsArrayBuffer(file);
-    e.target.value = '';
-  };
-
   // REAL-TIME IN-MEMORY EXCELJS RENDERER EFFECT (Direct redraw)
   useEffect(() => {
     if (!activeTemplate) return;
@@ -384,9 +363,61 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
     }
   };
 
-  const handlePrint = () => {
-    window.print();
+  // Convert A4 HTML specification sheet to high-res PDF Blob & Object URL
+  const generatePdfFromDom = useCallback(async () => {
+    if (!specSheetRef.current) return;
+    setIsGeneratingPdf(true);
+    try {
+      const res = await convertElementToPdfBlob(specSheetRef.current);
+      setPdfUrl(prev => {
+        if (prev) URL.revokeObjectURL(prev);
+        return res.url;
+      });
+    } catch (err: any) {
+      console.warn('PDF conversion error:', err);
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  }, []);
+
+  // Reload action: Re-transfers specs, updates ExcelJS grid, and re-generates PDF preview
+  const handleReloadPreview = useCallback(() => {
+    const { newVals, matchedMap } = transferSpecsFromEquipment(primaryItem, activeTemplate, formValues);
+    setFormValues(newVals);
+    setTransferredFieldsMap(matchedMap);
+    setRenderCounter(c => c + 1);
+    setPdfNotice('再読み込み中... 最新データをPDFプレビューへ反映しています');
+
+    setTimeout(async () => {
+      await generatePdfFromDom();
+      setPdfNotice('再読み込み完了: 入力情報とマッピングがPDFプレビューに反映されました');
+      setTimeout(() => setPdfNotice(''), 3500);
+    }, 250);
+  }, [primaryItem, activeTemplate, formValues, transferSpecsFromEquipment, generatePdfFromDom]);
+
+  // Download PDF file
+  const handleDownloadPdf = () => {
+    if (!pdfUrl) {
+      handleReloadPreview();
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = pdfUrl;
+    a.download = `${activeTemplate?.name || '仕様書'}_${fixedDocNo || 'SPEC'}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
+
+  // Auto-generate initial PDF preview once mounted and whenever template or primary equipment changes
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (specSheetRef.current) {
+        generatePdfFromDom();
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [activeTemplate?.id, primaryItem?.id, generatePdfFromDom]);
 
   // Group fields for clean user form presentation
   const basicFields = useMemo(() => (activeTemplate?.fields || []).filter(f => f.group === 'basic'), [activeTemplate]);
@@ -407,10 +438,6 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
             <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-2 py-0.5 rounded">
               （編集中）
             </span>
-            <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded font-mono font-semibold flex items-center gap-1">
-              <Zap className="w-3 h-3 text-emerald-600 fill-emerald-600" />
-              <span>Excel原本直接描画（本採用）</span>
-            </span>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
             機器仕様のセル自動転記・案件共通情報の一律反映・Excel原本へのメモリ内直接再描画をリアルタイムでプレビューできます。
@@ -429,24 +456,6 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
               <span>マッピング設定管理</span>
             </button>
           )}
-
-          <button
-            onClick={handleExportExcel}
-            disabled={isExporting}
-            className="px-4 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-md transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
-            title="ExcelJSでマスター雛形に値を流し込んで出力します"
-          >
-            <Download className={`w-3.5 h-3.5 ${isExporting ? 'animate-spin' : ''}`} />
-            <span>{isExporting ? '生成中...' : 'Excel出力 (.xlsx)'}</span>
-          </button>
-
-          <button
-            onClick={handlePrint}
-            className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
-          >
-            <Printer className="w-3.5 h-3.5 text-slate-600" />
-            <span>印刷 / PDF</span>
-          </button>
         </div>
       </div>
 
@@ -473,25 +482,6 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                   （編集中）
                 </span>
               </label>
-              
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => masterExcelInputRef.current?.click()}
-                  className="px-2.5 py-1 text-[11px] font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
-                  title="手元のExcelファイルをこのテンプレートの原本として取り込む"
-                >
-                  <Upload className="w-3 h-3 text-emerald-700" />
-                  <span>雛形Excel差替・読込</span>
-                </button>
-                <input
-                  type="file"
-                  ref={masterExcelInputRef}
-                  accept=".xlsx"
-                  onChange={handleDirectUploadMasterExcel}
-                  className="hidden"
-                />
-              </div>
             </div>
 
             <select
@@ -508,174 +498,9 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                 </option>
               ))}
             </select>
-
-            <div className="flex items-center justify-between text-[11px] bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 font-mono">
-              <span className="text-slate-500 flex items-center gap-1">
-                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                <span>適用原本:</span>
-              </span>
-              <span className="font-bold text-emerald-700 truncate max-w-[210px]" title={activeTemplate?.masterFileName || activeTemplate?.originalFileName}>
-                {activeTemplate?.masterFileName || activeTemplate?.originalFileName || 'システム内蔵高品位マスター (ExcelJS)'}
-              </span>
-            </div>
-
-            {directUploadNotice && (
-              <div className="bg-emerald-50 border border-emerald-300 text-emerald-800 text-[11px] p-2 rounded animate-in fade-in flex items-center justify-between">
-                <span>{directUploadNotice}</span>
-                <button type="button" onClick={() => setDirectUploadNotice('')} className="text-emerald-700 hover:text-emerald-900 font-bold ml-1">✕</button>
-              </div>
-            )}
           </div>
 
-          {/* 2. Equipment Selection & Automatic Spec Transfer Card */}
-          <div className="bg-white border border-indigo-200 rounded-xl p-4 shadow-2xs space-y-3">
-            <div className="flex items-center justify-between border-b border-indigo-100 pb-2">
-              <div>
-                <h2 className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
-                  <Cpu className="w-4 h-4 text-indigo-600" />
-                  <span>対象機器の選択 ＆ 仕様項目の自動転記</span>
-                </h2>
-                <p className="text-[10px] text-slate-500">
-                  選択した機器の仕様パラメータが、項目ラベルと一致するセルマッピングへ自動転記されます。
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleTriggerReTransfer}
-                className="px-2.5 py-1 text-[11px] font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded transition-colors flex items-center gap-1 cursor-pointer shrink-0"
-                title="機器の仕様項目からフォームへ再転記"
-              >
-                <RefreshCw className="w-3 h-3" />
-                <span>機器から再転記</span>
-              </button>
-            </div>
-
-            {/* Primary Equipment Chooser */}
-            <div>
-              <label className="text-[11px] font-semibold text-slate-700 flex items-center justify-between mb-1">
-                <span>主仕様の転記元機器（フォーカス機器）:</span>
-                <span className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded font-bold">
-                  （編集中）
-                </span>
-              </label>
-              <select
-                value={primaryItemId}
-                onChange={(e) => setPrimaryItemId(e.target.value)}
-                className="w-full text-xs font-bold text-slate-900 bg-slate-50 border border-slate-300 rounded-lg p-2 cursor-pointer focus:bg-white focus:border-indigo-500"
-              >
-                {projectItems.map(it => (
-                  <option key={it.id} value={it.id}>
-                    [{it.tagNo || '未割当'}] {it.name} ({it.quantity} {it.unit || '台'}){it.id === primaryItemId ? '（編集中）' : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Display Detected Specifications for this equipment */}
-            {primaryItem && (
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2 text-xs">
-                <div className="flex items-center justify-between text-[11px] font-semibold text-slate-700">
-                  <span>機器「{primaryItem.name}」の登録仕様一覧:</span>
-                  <span className="font-mono text-indigo-600 font-bold">{primaryItem.tagNo || '-'}</span>
-                </div>
-
-                <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
-                  {primaryItem.specs && primaryItem.specs.length > 0 ? (
-                    primaryItem.specs.map(spec => (
-                      <span
-                        key={spec.id}
-                        className="inline-flex items-center gap-1 bg-white border border-indigo-200 px-2 py-1 rounded text-[11px] font-mono shadow-2xs"
-                      >
-                        <span className="text-slate-500 font-sans">{spec.name}:</span>
-                        <span className="font-bold text-indigo-900">{spec.value}</span>
-                        {spec.unit && <span className="text-slate-500 text-[10px]">{spec.unit}</span>}
-                      </span>
-                    ))
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5 font-mono text-[11px]">
-                      {primaryItem.diameter && primaryItem.diameter !== '-' && (
-                        <span className="bg-white border border-slate-200 px-2 py-0.5 rounded">
-                          口径: {primaryItem.diameter}
-                        </span>
-                      )}
-                      {primaryItem.material && primaryItem.material !== '-' && (
-                        <span className="bg-white border border-slate-200 px-2 py-0.5 rounded">
-                          材質: {primaryItem.material}
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {primaryItem.deliveryDate && (
-                    <span className="inline-flex items-center gap-1 bg-white border border-slate-200 px-2 py-1 rounded text-[11px] font-mono">
-                      <span className="text-slate-500 font-sans">納期:</span>
-                      <span className="font-semibold text-slate-800">{primaryItem.deliveryDate}</span>
-                    </span>
-                  )}
-                </div>
-
-                <div className="text-[10px] text-slate-400">
-                  ※口径、材質、塗装、耐圧、出力などの項目名がテンプレートの項目定義と自動照合され、該当セルに直接転記されます。
-                </div>
-              </div>
-            )}
-
-            {/* Checkbox list of all included equipments */}
-            <div className="pt-2 border-t border-slate-100">
-              <div className="flex items-center justify-between text-[11px] font-semibold text-slate-700 mb-1.5">
-                <span>明細テーブルに含める機器 ({activeItems.length}/{projectItems.length}件):</span>
-                <div className="flex items-center gap-1 text-[10px]">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedItemIds(projectItems.map(i => i.id))}
-                    className="text-indigo-600 hover:underline cursor-pointer"
-                  >
-                    全選択
-                  </button>
-                  <span className="text-slate-300">|</span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedItemIds([])}
-                    className="text-slate-500 hover:underline cursor-pointer"
-                  >
-                    全解除
-                  </button>
-                </div>
-              </div>
-
-              <div className="max-h-32 overflow-y-auto space-y-1 pr-1 divide-y divide-slate-100">
-                {projectItems.map(item => {
-                  const isChecked = selectedItemIds.includes(item.id);
-                  return (
-                    <div
-                      key={item.id}
-                      onClick={() => {
-                        setSelectedItemIds(prev => 
-                          isChecked ? prev.filter(id => id !== item.id) : [...prev, item.id]
-                        );
-                      }}
-                      className="pt-1 first:pt-0 flex items-center justify-between text-xs cursor-pointer hover:bg-slate-50 p-1 rounded"
-                    >
-                      <div className="flex items-center gap-2 truncate">
-                        <button type="button" className="text-indigo-600 shrink-0">
-                          {isChecked ? <CheckSquare className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5 text-slate-300" />}
-                        </button>
-                        <span className="font-mono font-semibold text-slate-700 shrink-0">{item.tagNo || '-'}</span>
-                        <span className="text-slate-900 truncate font-medium">{item.name}</span>
-                      </div>
-                      <span className="text-[11px] font-mono text-slate-500 shrink-0">
-                        {item.quantity} {item.unit || '台'}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-          </div>
-
-          {/* 3. Section: 基本情報 & 案件共通連動 (No A1/B5) */}
+          {/* 2. Section: 基本情報 & 案件共通連動 (Moved here as requested) */}
           <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-3">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <h2 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
@@ -803,6 +628,169 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                 );
               })}
             </div>
+          </div>
+
+          {/* 3. Equipment Selection & Automatic Spec Transfer Card */}
+          <div className="bg-white border border-indigo-200 rounded-xl p-4 shadow-2xs space-y-3">
+            <div className="flex items-center justify-between border-b border-indigo-100 pb-2">
+              <div>
+                <h2 className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                  <Cpu className="w-4 h-4 text-indigo-600" />
+                  <span>対象機器の選択 ＆ 仕様項目の自動転記</span>
+                </h2>
+                <p className="text-[10px] text-slate-500">
+                  選択した機器の仕様パラメータが、項目ラベルと一致するセルマッピングへ自動転記されます。
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleTriggerReTransfer}
+                className="px-2.5 py-1 text-[11px] font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+                title="機器の仕様項目からフォームへ再転記"
+              >
+                <RefreshCw className="w-3 h-3" />
+                <span>機器から再転記</span>
+              </button>
+            </div>
+
+            {/* Included Equipments in this Specification */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-[11px] font-semibold text-slate-700">
+                <span>仕様書に含める機器 ({activeItems.length}件):</span>
+                <span className="text-[10px] text-slate-400">
+                  主仕様（転記元）をラジオで選択
+                </span>
+              </div>
+
+              {/* List of included equipment items */}
+              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                {activeItems.map(it => {
+                  const isPrimary = it.id === primaryItemId;
+                  return (
+                    <div
+                      key={it.id}
+                      className={`flex items-center justify-between p-2 rounded-lg border text-xs transition-colors ${
+                        isPrimary ? 'bg-indigo-50/70 border-indigo-300' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 truncate">
+                        <button
+                          type="button"
+                          onClick={() => setPrimaryItemId(it.id)}
+                          className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 cursor-pointer ${
+                            isPrimary ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 bg-white'
+                          }`}
+                          title={isPrimary ? '主仕様（転記元）として選択中' : 'この機器を主仕様（転記元）に設定'}
+                        >
+                          {isPrimary && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                        </button>
+                        <span className="font-mono font-bold text-slate-800 shrink-0">
+                          [{it.tagNo || '未割当'}]
+                        </span>
+                        <span className="font-semibold text-slate-900 truncate">
+                          {it.name}
+                        </span>
+                        <span className="text-[11px] text-slate-500 shrink-0 font-mono">
+                          ({it.quantity} {it.unit || '台'})
+                        </span>
+                        {isPrimary && (
+                          <span className="text-[9px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.2 rounded shrink-0">
+                            主仕様（編集中）
+                          </span>
+                        )}
+                      </div>
+
+                      {activeItems.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveEquipment(it.id)}
+                          className="text-slate-400 hover:text-red-600 p-1 rounded hover:bg-red-50 transition-colors ml-1 cursor-pointer shrink-0"
+                          title="この機器を仕様書から除外"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Add Equipment Row (複数機器を含める場合があるため追加ボタンを追加) */}
+              {unselectedItems.length > 0 && (
+                <div className="pt-2 flex items-center gap-1.5">
+                  <select
+                    value={itemToAddId}
+                    onChange={(e) => setItemToAddId(e.target.value)}
+                    className="flex-1 text-xs bg-white border border-slate-300 rounded-lg p-2 font-medium text-slate-800 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                  >
+                    <option value="">＋ 追加する機器を選択...</option>
+                    {unselectedItems.map(it => (
+                      <option key={it.id} value={it.id}>
+                        [{it.tagNo || '未割当'}] {it.name} ({it.quantity} {it.unit || '台'})
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleAddEquipment}
+                    disabled={!itemToAddId}
+                    className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg shadow-2xs flex items-center gap-1 cursor-pointer shrink-0 transition-colors"
+                  >
+                    <span>＋ 機器を追加</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Display Detected Specifications for active primary equipment */}
+            {primaryItem && (
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2 text-xs">
+                <div className="flex items-center justify-between text-[11px] font-semibold text-slate-700">
+                  <span>主仕様機器「{primaryItem.name}」の登録仕様一覧:</span>
+                  <span className="font-mono text-indigo-600 font-bold">{primaryItem.tagNo || '-'}</span>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
+                  {primaryItem.specs && primaryItem.specs.length > 0 ? (
+                    primaryItem.specs.map(spec => (
+                      <span
+                        key={spec.id}
+                        className="inline-flex items-center gap-1 bg-white border border-indigo-200 px-2 py-1 rounded text-[11px] font-mono shadow-2xs"
+                      >
+                        <span className="text-slate-500 font-sans">{spec.name}:</span>
+                        <span className="font-bold text-indigo-900">{spec.value}</span>
+                        {spec.unit && <span className="text-slate-500 text-[10px]">{spec.unit}</span>}
+                      </span>
+                    ))
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5 font-mono text-[11px]">
+                      {primaryItem.diameter && primaryItem.diameter !== '-' && (
+                        <span className="bg-white border border-slate-200 px-2 py-0.5 rounded">
+                          口径: {primaryItem.diameter}
+                        </span>
+                      )}
+                      {primaryItem.material && primaryItem.material !== '-' && (
+                        <span className="bg-white border border-slate-200 px-2 py-0.5 rounded">
+                          材質: {primaryItem.material}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {primaryItem.deliveryDate && (
+                    <span className="inline-flex items-center gap-1 bg-white border border-slate-200 px-2 py-1 rounded text-[11px] font-mono">
+                      <span className="text-slate-500 font-sans">納期:</span>
+                      <span className="font-semibold text-slate-800">{primaryItem.deliveryDate}</span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="text-[10px] text-slate-400">
+                  ※口径、材質、塗装、耐圧、出力などの項目名がテンプレートの項目定義と自動照合され、該当セルに直接転記されます。
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 4. Section: 仕様・条件選択 (プルダウン形式) */}
@@ -969,59 +957,96 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
           )}
         </div>
 
-        {/* Right Column: Real-Time Excel Spreadsheet View (7 cols) */}
+        {/* Right Column: PDF Preview (Default) & Real-Time Excel Spreadsheet View (7 cols) */}
         <div className="lg:col-span-7 space-y-3">
-          {/* Header Strip: Title, Zoom, and Download Actions */}
+          {/* Header Strip: Title, Reload, Mode Toggle, and Download Actions */}
           <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-2xs space-y-2.5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center border border-emerald-200 shrink-0">
-                  <FileSpreadsheet className="w-4 h-4" />
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center border shrink-0 ${
+                  previewMode === 'pdf' 
+                    ? 'bg-rose-50 text-rose-700 border-rose-200' 
+                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                }`}>
+                  {previewMode === 'pdf' ? <FileText className="w-4 h-4" /> : <FileSpreadsheet className="w-4 h-4" />}
                 </div>
                 <div>
-                  <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                    <span>Excel原本 直接描画ビュー</span>
-                    <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 rounded">
+                  <div className="flex items-center gap-1.5">
+                    <h2 className="text-xs font-bold text-slate-900">
+                      {previewMode === 'pdf' ? '仕様書プレビュー (PDF)' : 'Excel原本 直接描画ビュー'}
+                    </h2>
+                    <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.2 rounded">
                       （編集中）
                     </span>
-                    <span className="text-[10px] bg-emerald-100 text-emerald-800 font-semibold px-2 py-0.5 rounded">
-                      原本セル直接連動
-                    </span>
                   </div>
-                  <div className="text-[11px] text-slate-500 truncate max-w-sm">
-                    使用中テンプレート: <strong className="text-slate-700">{activeTemplate?.masterFileName || activeTemplate?.originalFileName || activeTemplate?.name}</strong>
-                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    {previewMode === 'pdf' 
+                      ? '入力内容とマッピングをPDFへ変換してプレビュー表示しています' 
+                      : 'ExcelJSメモリ内スプレッドシート（セル直接クリック・数式バー編集対応）'}
+                  </p>
                 </div>
               </div>
 
-              {/* Action Buttons & Zoom */}
-              <div className="flex items-center gap-2">
-                {/* Zoom Controls */}
-                <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg px-1.5 py-0.5 text-xs">
+              {/* Action Buttons: Reload, Mode switch, Downloads */}
+              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                {/* Prominent Reload Preview Button */}
+                <button
+                  type="button"
+                  onClick={handleReloadPreview}
+                  disabled={isGeneratingPdf}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
+                  title="エクセル入力やマッピングの変更を再読み込みして最新PDFを反映"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingPdf ? 'animate-spin' : ''}`} />
+                  <span>再読み込み</span>
+                </button>
+
+                {/* View Mode Toggle: [ PDF ] / [ Excel ] */}
+                <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs shrink-0">
                   <button
-                    onClick={() => setPreviewZoom(Math.max(60, previewZoom - 10))}
-                    className="p-1 hover:bg-slate-200 rounded text-slate-600 cursor-pointer"
-                    title="縮小"
+                    type="button"
+                    onClick={() => setPreviewMode('pdf')}
+                    className={`px-2.5 py-1 rounded font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                      previewMode === 'pdf'
+                        ? 'bg-white text-rose-700 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
                   >
-                    <ZoomOut className="w-3.5 h-3.5" />
+                    <FileText className="w-3 h-3" />
+                    <span>PDF</span>
                   </button>
-                  <span className="font-mono text-slate-700 text-xs w-9 text-center font-bold">
-                    {previewZoom}%
-                  </span>
                   <button
-                    onClick={() => setPreviewZoom(Math.min(140, previewZoom + 10))}
-                    className="p-1 hover:bg-slate-200 rounded text-slate-600 cursor-pointer"
-                    title="拡大"
+                    type="button"
+                    onClick={() => setPreviewMode('excel')}
+                    className={`px-2.5 py-1 rounded font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                      previewMode === 'excel'
+                        ? 'bg-white text-emerald-700 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
                   >
-                    <ZoomIn className="w-3.5 h-3.5" />
+                    <FileSpreadsheet className="w-3 h-3" />
+                    <span>Excel</span>
                   </button>
                 </div>
 
-                {/* 1-Click Excel Download */}
+                {/* PDF Download Button */}
                 <button
+                  type="button"
+                  onClick={handleDownloadPdf}
+                  className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition-all shadow-2xs flex items-center gap-1 cursor-pointer shrink-0"
+                  title="仕様書をPDFファイルとしてダウンロード"
+                >
+                  <Download className="w-3.5 h-3.5 text-rose-600" />
+                  <span>PDF出力</span>
+                </button>
+
+                {/* Excel Download Button */}
+                <button
+                  type="button"
                   onClick={handleExportExcel}
                   disabled={isExporting}
-                  className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
+                  className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1 cursor-pointer disabled:opacity-50 shrink-0"
+                  title="マスター雛形Excelへ流し込んだxlsxファイルをダウンロード"
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>{isExporting ? '出力中...' : 'Excel出力'}</span>
@@ -1029,191 +1054,408 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
               </div>
             </div>
 
-            {/* Excel Formula Bar: [ C5 ] fx [ input ] */}
-            <div className="bg-slate-50 border border-slate-300 rounded-lg p-1.5 flex items-center gap-2 text-xs">
-              <div className="flex items-center gap-1 font-mono font-bold bg-white border border-slate-300 px-2 py-1 rounded text-slate-800 shrink-0 shadow-2xs">
-                <span className="text-indigo-600">セル:</span>
-                <span className="text-slate-900">{selectedCellAddress}</span>
+            {/* Notification Bar */}
+            {pdfNotice && (
+              <div className="bg-indigo-50 border border-indigo-200 text-indigo-900 text-xs px-3 py-1.5 rounded-lg flex items-center justify-between animate-in fade-in">
+                <span className="flex items-center gap-1.5 font-medium">
+                  <CheckSquare className="w-3.5 h-3.5 text-indigo-600" />
+                  {pdfNotice}
+                </span>
+                <button onClick={() => setPdfNotice('')} className="text-indigo-400 hover:text-indigo-700">✕</button>
               </div>
-              <span className="font-mono text-slate-400 font-bold px-1 select-none text-xs">fx</span>
-              <input
-                type="text"
-                value={currentFormulaValue}
-                onChange={(e) => handleFormulaChange(e.target.value)}
-                placeholder={selectedCellMappedField ? `【${selectedCellMappedField.label}】の値を直接編集...` : '選択したセルの値を直接入力・確認...'}
-                className="flex-1 bg-white border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-900 font-medium focus:outline-hidden focus:border-indigo-500 shadow-2xs"
-              />
-              {selectedCellMappedField ? (
-                <span className="text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded font-medium whitespace-nowrap shrink-0 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
-                  連動: {selectedCellMappedField.label}
-                </span>
-              ) : (
-                <span className="text-[10px] text-slate-400 border border-slate-200 bg-white px-2 py-0.5 rounded font-mono whitespace-nowrap shrink-0">
-                  未マッピングセル
-                </span>
-              )}
-            </div>
+            )}
 
-            {/* Performance Benchmark Indicator Bar */}
-            <div className="bg-slate-900 text-slate-200 rounded-lg px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-                <span className="text-white font-bold">
-                  ⚡ メモリ内ExcelJS即時再描画:
-                </span>
-                <span className="text-emerald-400 font-bold text-sm">
-                  {excelGridData?.benchmarkMs ?? '--'} ms
-                </span>
-                <span className="text-slate-400 text-[11px] font-sans hidden sm:inline">
-                  （セルをクリックして選択、または左側フォーム入力で即時反映）
-                </span>
+            {/* Excel Formula Bar: Shown when in Excel mode */}
+            {previewMode === 'excel' && (
+              <div className="bg-slate-50 border border-slate-300 rounded-lg p-1.5 flex items-center gap-2 text-xs">
+                <div className="flex items-center gap-1 font-mono font-bold bg-white border border-slate-300 px-2 py-1 rounded text-slate-800 shrink-0 shadow-2xs">
+                  <span className="text-indigo-600">セル:</span>
+                  <span className="text-slate-900">{selectedCellAddress}</span>
+                </div>
+                <span className="font-mono text-slate-400 font-bold px-1 select-none text-xs">fx</span>
+                <input
+                  type="text"
+                  value={currentFormulaValue}
+                  onChange={(e) => handleFormulaChange(e.target.value)}
+                  placeholder={selectedCellMappedField ? `【${selectedCellMappedField.label}】の値を直接編集...` : '選択したセルの値を直接入力・確認...'}
+                  className="flex-1 bg-white border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-900 font-medium focus:outline-hidden focus:border-indigo-500 shadow-2xs"
+                />
+                {selectedCellMappedField ? (
+                  <span className="text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded font-medium whitespace-nowrap shrink-0 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
+                    連動: {selectedCellMappedField.label}
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-slate-400 border border-slate-200 bg-white px-2 py-0.5 rounded font-mono whitespace-nowrap shrink-0">
+                    未マッピングセル
+                  </span>
+                )}
               </div>
-              <div className="flex items-center gap-3 text-[11px] text-slate-300">
-                <span>セル数: {excelGridData?.totalCells ?? 0}</span>
-                <button
-                  type="button"
-                  onClick={() => setRenderCounter(c => c + 1)}
-                  className="text-indigo-300 hover:text-white underline cursor-pointer"
-                >
-                  再読込
-                </button>
-              </div>
-            </div>
+            )}
           </div>
 
-          {/* Authentic Real-Time Excel Spreadsheet Grid (ExcelJS) */}
-          <div className="overflow-x-auto pb-4">
-            <div 
-              style={{ transform: `scale(${previewZoom / 100})`, transformOrigin: 'top left' }}
-              className="bg-white border border-slate-300 shadow-md rounded-lg overflow-hidden min-w-[760px] transition-transform select-none"
-            >
-              {/* Sheet Tabs Bar */}
-              <div className="bg-slate-100 border-b border-slate-300 px-2 py-1 flex items-center justify-between text-xs">
-                <div className="flex items-center gap-1 overflow-x-auto">
-                  {excelGridData?.availableSheets && excelGridData.availableSheets.length > 0 ? (
-                    excelGridData.availableSheets.map(s => {
-                      const isActive = (selectedSheetOverride || excelGridData.sheetName) === s;
-                      return (
-                        <button
-                          key={s}
-                          type="button"
-                          onClick={() => setSelectedSheetOverride(s)}
-                          className={`px-3 py-1 font-bold text-xs transition-colors rounded-t border-t-2 border-x cursor-pointer ${
-                            isActive
-                              ? 'bg-white border-t-emerald-600 border-x-slate-300 text-slate-900 shadow-2xs'
-                              : 'bg-slate-200/70 border-transparent text-slate-600 hover:bg-slate-200 hover:text-slate-900'
-                          }`}
-                        >
-                          {s}
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <span className="bg-white border-t-2 border-emerald-600 border-x border-slate-300 px-3 py-1 font-bold text-slate-900 shadow-2xs">
-                      {excelGridData?.sheetName || '仕様書'}
-                    </span>
-                  )}
-                </div>
-                <div className="text-[11px] text-slate-500 font-mono pr-2">
-                  ExcelJS In-Memory Grid Canvas
-                </div>
+          {/* VIEW MODE 1: PDF PREVIEW (PDFに変換して表示) */}
+          {previewMode === 'pdf' && (
+            <div className="space-y-2">
+              <div className="bg-white border border-slate-300 shadow-sm rounded-xl overflow-hidden">
+                {isGeneratingPdf && !pdfUrl ? (
+                  <div className="h-[760px] flex flex-col items-center justify-center space-y-3 bg-slate-50">
+                    <RefreshCw className="w-8 h-8 text-indigo-600 animate-spin" />
+                    <p className="text-xs font-semibold text-slate-700">仕様書をPDFに変換中...</p>
+                    <p className="text-[11px] text-slate-400">マッピング定義と入力データを解析・描画しています</p>
+                  </div>
+                ) : pdfUrl ? (
+                  <iframe
+                    src={`${pdfUrl}#toolbar=0&navpanes=0`}
+                    className="w-full h-[760px] border-none bg-slate-100"
+                    title="仕様書 PDF プレビュー"
+                  />
+                ) : (
+                  <div className="h-[760px] flex flex-col items-center justify-center space-y-3 bg-slate-50">
+                    <FileText className="w-10 h-10 text-slate-300" />
+                    <p className="text-xs font-semibold text-slate-600">PDFプレビューの準備ができていません</p>
+                    <button
+                      type="button"
+                      onClick={handleReloadPreview}
+                      className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 transition-colors shadow-xs"
+                    >
+                      PDFを生成する
+                    </button>
+                  </div>
+                )}
               </div>
 
-              {/* Spreadsheet Table with Column Letters (A, B, C...) & Row Numbers (1, 2, 3...) */}
-              <div className="overflow-x-auto max-h-[720px] overflow-y-auto">
-                <table className="border-collapse text-xs font-sans w-full bg-white">
-                  {/* Column Headers (A, B, C...) */}
-                  <thead className="bg-slate-200/90 text-slate-700 font-mono font-semibold border-b border-slate-300 sticky top-0 z-20">
-                    <tr>
-                      <th className="w-10 p-1 text-center border-r border-slate-300 bg-slate-300/80 text-[10px] sticky left-0 z-30">#</th>
-                      {excelGridData?.columns.map(col => (
-                        <th 
-                          key={col.colLetter}
-                          style={{ width: `${col.width}px` }}
-                          className="p-1 text-center border-r border-slate-300 text-[11px] bg-slate-200"
-                        >
-                          {col.colLetter}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {excelGridData?.rows.map(row => (
-                      <tr key={row.rowNumber} className="border-b border-slate-200">
-                        {/* Row Number (1, 2, 3...) */}
-                        <td className="bg-slate-100 text-slate-500 font-mono text-[10px] text-center p-1 border-r border-slate-300 sticky left-0 z-10 select-none">
-                          {row.rowNumber}
-                        </td>
-                        {/* Row Cells */}
-                        {row.cells.map(cell => {
-                          // Skip merged child cells to avoid rendering distorted extra cells
-                          if (cell.isMergedChild) {
-                            return null;
-                          }
-
-                          const isSelected = cell.address === selectedCellAddress;
-                          const isMapped = Boolean(cell.isMapped || cell.mappedFieldId);
-
-                          return (
-                            <td
-                              key={cell.address}
-                              colSpan={cell.colSpan || 1}
-                              rowSpan={cell.rowSpan || 1}
-                              onClick={() => {
-                                setSelectedCellAddress(cell.address);
-                                if (cell.mappedFieldId) {
-                                  setFocusedFieldId(cell.mappedFieldId);
-                                }
-                              }}
-                              title={`セル ${cell.address}${cell.mappedFieldLabel ? ` (連動: ${cell.mappedFieldLabel})` : ''}: ${cell.value}`}
-                              style={{
-                                backgroundColor: isSelected ? '#EEF2FF' : (cell.bgColor || undefined),
-                                textAlign: cell.align || 'left',
-                                color: cell.fontColor || undefined,
-                              }}
-                              className={`p-1.5 border-r border-slate-200 text-xs transition-colors cursor-cell select-text ${
-                                cell.isBold ? 'font-bold' : ''
-                              } ${
-                                isSelected ? 'ring-2 ring-indigo-600 bg-indigo-50/70 z-10 font-bold shadow-xs' : ''
-                              } ${
-                                isMapped && !isSelected ? 'hover:bg-indigo-50/40' : 'hover:bg-slate-50'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between gap-1 overflow-hidden">
-                                <span className="truncate">{cell.value || ''}</span>
-                                {isMapped && (
-                                  <span 
-                                    className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0 opacity-70" 
-                                    title={`マッピング連動: ${cell.mappedFieldLabel || ''}`} 
-                                  />
-                                )}
-                              </div>
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Status footer for the Excel Sheet */}
-              <div className="p-2.5 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500 flex items-center justify-between">
+              {/* Status bar */}
+              <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-500 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                  <span>セルをクリックすると上の数式バーおよび左の項目と連動して編集できます。</span>
+                  <span>マッピングや入力値を更新した後、右上の「再読み込み」を押すと最新のPDFプレビューが反映されます。</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-indigo-700 font-semibold">
-                    選択セル: {selectedCellAddress}
-                  </span>
-                  <span className="text-slate-300">|</span>
-                  <span className="font-mono text-emerald-700 font-semibold">1-Click .xlsx Export Ready</span>
+                {pdfUrl && (
+                  <a
+                    href={pdfUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-bold text-indigo-600 hover:text-indigo-800 underline shrink-0"
+                  >
+                    別ウィンドウでPDFを開く ↗
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* VIEW MODE 2: EXCEL ORIGINAL LIVE GRID */}
+          {previewMode === 'excel' && (
+            <div className="overflow-x-auto pb-4">
+              <div 
+                style={{ transform: `scale(${previewZoom / 100})`, transformOrigin: 'top left' }}
+                className="bg-white border border-slate-300 shadow-md rounded-lg overflow-hidden min-w-[760px] transition-transform select-none"
+              >
+                {/* Sheet Tabs Bar */}
+                <div className="bg-slate-100 border-b border-slate-300 px-2 py-1 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1 overflow-x-auto">
+                    {excelGridData?.availableSheets && excelGridData.availableSheets.length > 0 ? (
+                      excelGridData.availableSheets.map(s => {
+                        const isActive = (selectedSheetOverride || excelGridData.sheetName) === s;
+                        return (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => setSelectedSheetOverride(s)}
+                            className={`px-3 py-1 font-bold text-xs transition-colors rounded-t border-t-2 border-x cursor-pointer ${
+                              isActive
+                                ? 'bg-white border-t-emerald-600 border-x-slate-300 text-slate-900 shadow-2xs'
+                                : 'bg-slate-200/70 border-transparent text-slate-600 hover:bg-slate-200 hover:text-slate-900'
+                            }`}
+                          >
+                            {s}
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <span className="bg-white border-t-2 border-emerald-600 border-x border-slate-300 px-3 py-1 font-bold text-slate-900 shadow-2xs">
+                        {excelGridData?.sheetName || '仕様書'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-slate-500 font-mono pr-2">
+                    ExcelJS In-Memory Grid Canvas
+                  </div>
+                </div>
+
+                {/* Spreadsheet Table with Column Letters (A, B, C...) & Row Numbers (1, 2, 3...) */}
+                <div className="overflow-x-auto max-h-[720px] overflow-y-auto">
+                  <table className="border-collapse text-xs font-sans w-full bg-white">
+                    <thead className="bg-slate-200/90 text-slate-700 font-mono font-semibold border-b border-slate-300 sticky top-0 z-20">
+                      <tr>
+                        <th className="w-10 p-1 text-center border-r border-slate-300 bg-slate-300/80 text-[10px] sticky left-0 z-30">#</th>
+                        {excelGridData?.columns.map(col => (
+                          <th 
+                            key={col.colLetter}
+                            style={{ width: `${col.width}px` }}
+                            className="p-1 text-center border-r border-slate-300 text-[11px] bg-slate-200"
+                          >
+                            {col.colLetter}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {excelGridData?.rows.map(row => (
+                        <tr key={row.rowNumber} className="border-b border-slate-200">
+                          <td className="bg-slate-100 text-slate-500 font-mono text-[10px] text-center p-1 border-r border-slate-300 sticky left-0 z-10 select-none">
+                            {row.rowNumber}
+                          </td>
+                          {row.cells.map(cell => {
+                            if (cell.isMergedChild) {
+                              return null;
+                            }
+                            const isSelected = cell.address === selectedCellAddress;
+                            const isMapped = Boolean(cell.isMapped || cell.mappedFieldId);
+
+                            return (
+                              <td
+                                key={cell.address}
+                                colSpan={cell.colSpan || 1}
+                                rowSpan={cell.rowSpan || 1}
+                                onClick={() => {
+                                  setSelectedCellAddress(cell.address);
+                                  if (cell.mappedFieldId) {
+                                    setFocusedFieldId(cell.mappedFieldId);
+                                  }
+                                }}
+                                title={`セル ${cell.address}${cell.mappedFieldLabel ? ` (連動: ${cell.mappedFieldLabel})` : ''}: ${cell.value}`}
+                                style={{
+                                  backgroundColor: isSelected ? '#EEF2FF' : (cell.bgColor || undefined),
+                                  textAlign: cell.align || 'left',
+                                  color: cell.fontColor || undefined,
+                                }}
+                                className={`p-1.5 border-r border-slate-200 text-xs transition-colors cursor-cell select-text ${
+                                  cell.isBold ? 'font-bold' : ''
+                                } ${
+                                  isSelected ? 'ring-2 ring-indigo-600 bg-indigo-50/70 z-10 font-bold shadow-xs' : ''
+                                } ${
+                                  isMapped && !isSelected ? 'hover:bg-indigo-50/40' : 'hover:bg-slate-50'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-1 overflow-hidden">
+                                  <span className="truncate">{cell.value || ''}</span>
+                                  {isMapped && (
+                                    <span 
+                                      className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0 opacity-70" 
+                                      title={`マッピング連動: ${cell.mappedFieldLabel || ''}`} 
+                                    />
+                                  )}
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Status footer for the Excel Sheet */}
+                <div className="p-2.5 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    <span>セルをクリックすると上の数式バーおよび左の項目と連動して編集できます。</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-indigo-700 font-semibold">
+                      選択セル: {selectedCellAddress}
+                    </span>
+                    <span className="text-slate-300">|</span>
+                    <span className="font-mono text-emerald-700 font-semibold">1-Click .xlsx Export Ready</span>
+                  </div>
                 </div>
               </div>
             </div>
+          )}
+        </div>
+      </div>
+
+      {/* OFFSCREEN A4 SPECIFICATION SHEET CONTAINER FOR HIGH-RES PDF GENERATION */}
+      <div
+        ref={specSheetRef}
+        style={{
+          position: 'fixed',
+          left: '-9999px',
+          top: '0',
+          width: '794px', // 210mm at 96 DPI
+          minHeight: '1123px', // 297mm at 96 DPI
+          backgroundColor: '#ffffff',
+          color: '#0f172a',
+          zIndex: -100,
+          boxSizing: 'border-box',
+          padding: '40px 44px',
+          fontFamily: '"Hiragino Sans", "Meiryo", "BIZ UDPGothic", "Yu Gothic", sans-serif',
+        }}
+      >
+        {/* Document Header */}
+        <div className="border-b-2 border-slate-900 pb-3 mb-4">
+          <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono mb-1">
+            <span>{activeTemplate?.code || 'SPEC-DOC'}</span>
+            <span>{formValues['f-date'] || new Date().toISOString().slice(0, 10)} 発行</span>
           </div>
+          <h1 className="text-xl font-bold text-slate-900 text-center tracking-wider py-1 border-y border-slate-300 bg-slate-50">
+            【 {formValues['f-title'] || activeTemplate?.name || '機器調達仕様書'} 】
+          </h1>
+        </div>
+
+        {/* Basic Metadata Grid */}
+        <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs border border-slate-300 p-3 mb-4 bg-slate-50/60 rounded">
+          <div className="flex items-center">
+            <span className="w-24 text-slate-500 font-semibold shrink-0">仕様書番号:</span>
+            <span className="font-mono font-bold text-slate-900">{formValues['f-docno'] || fixedDocNo}</span>
+          </div>
+          <div className="flex items-center">
+            <span className="w-24 text-slate-500 font-semibold shrink-0">発行日:</span>
+            <span className="font-mono text-slate-800">{formValues['f-date'] || new Date().toISOString().slice(0, 10)}</span>
+          </div>
+          <div className="flex items-center">
+            <span className="w-24 text-slate-500 font-semibold shrink-0">工事・件名:</span>
+            <span className="font-bold text-slate-900 truncate">{formValues['f-project-name'] || currentProject?.name || '-'}</span>
+          </div>
+          <div className="flex items-center">
+            <span className="w-24 text-slate-500 font-semibold shrink-0">発行元:</span>
+            <span className="text-slate-800">{formValues['f-issuer'] || currentProject?.department || '設計部'}</span>
+          </div>
+          <div className="flex items-center">
+            <span className="w-24 text-slate-500 font-semibold shrink-0">客先名 / 発注元:</span>
+            <span className="font-medium text-slate-900 truncate">{formValues['f-client-name'] || currentProject?.clientName || '-'}</span>
+          </div>
+          <div className="flex items-center">
+            <span className="w-24 text-slate-500 font-semibold shrink-0">工事場所:</span>
+            <span className="text-slate-800 truncate">{currentProject?.location || '-'}</span>
+          </div>
+          {currentProject?.orderNo && (
+            <div className="flex items-center">
+              <span className="w-24 text-slate-500 font-semibold shrink-0">オーダーNo.:</span>
+              <span className="font-mono font-bold text-indigo-900">{currentProject.orderNo}</span>
+            </div>
+          )}
+          {(currentProject?.clientNumber || currentProject?.clientNumberPart1) && (
+            <div className="flex items-center">
+              <span className="w-24 text-slate-500 font-semibold shrink-0">客先番号:</span>
+              <span className="font-mono font-bold text-slate-800">
+                {currentProject.clientNumber || `【${currentProject.clientNumberPart1 || ''}】-【${currentProject.clientNumberPart2 || ''}】`}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Section 1: Applied requirements & checkbox mappings */}
+        <div className="mb-4">
+          <div className="text-xs font-bold bg-slate-200/80 px-2.5 py-1 text-slate-800 border-l-4 border-slate-700 mb-2">
+            1. 適用要件・指定基準 (チェック項目 ＆ 仕様条件)
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs border border-slate-300 p-2.5 rounded bg-white">
+            {checkFields.map(cf => {
+              const isChecked = Boolean(formValues[cf.id]);
+              const cfg = cf.checkboxConfig;
+              return (
+                <div key={cf.id} className="flex items-center justify-between p-1 border-b border-slate-100">
+                  <span className="text-slate-700 font-medium">{cf.label}:</span>
+                  <span className="font-bold font-mono">
+                    {isChecked 
+                      ? (cfg?.checkedValue || `☑ ${cfg?.labelTrue || '要'}`) 
+                      : (cfg?.uncheckedValue || `☐ ${cfg?.labelFalse || '不要'}`)}
+                  </span>
+                </div>
+              );
+            })}
+            {specFields.map(sf => (
+              <div key={sf.id} className="flex items-center justify-between p-1 border-b border-slate-100">
+                <span className="text-slate-700 font-medium">{sf.label}:</span>
+                <span className="font-semibold text-slate-900">{formValues[sf.id] || sf.defaultValue || '-'}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Section 2: Equipment details table */}
+        <div className="mb-4">
+          <div className="text-xs font-bold bg-slate-200/80 px-2.5 py-1 text-slate-800 border-l-4 border-slate-700 mb-2">
+            2. 対象機器・調達品目明細 ({activeItems.length}件)
+          </div>
+          <table className="w-full text-left text-xs border-collapse border border-slate-400">
+            <thead>
+              <tr className="bg-slate-100 font-semibold text-slate-800 border-b border-slate-400">
+                <th className="p-1.5 border-r border-slate-300 w-24">機器番号</th>
+                <th className="p-1.5 border-r border-slate-300">機器名称</th>
+                <th className="p-1.5 border-r border-slate-300">仕様・口径</th>
+                <th className="p-1.5 border-r border-slate-300 w-20">材質</th>
+                <th className="p-1.5 border-r border-slate-300 w-16 text-center">数量</th>
+                <th className="p-1.5 w-24">納期</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activeItems.map((item, idx) => {
+                const specSummary = item.specs && item.specs.length > 0 
+                  ? item.specs.map(s => `${s.name}:${s.value}`).join(' / ')
+                  : (item.diameter || '-');
+                return (
+                  <tr key={item.id || idx} className="border-b border-slate-300 hover:bg-slate-50">
+                    <td className="p-1.5 border-r border-slate-300 font-mono font-bold text-slate-900">
+                      {item.tagNo || '-'}
+                    </td>
+                    <td className="p-1.5 border-r border-slate-300 font-semibold text-slate-800">
+                      {item.name}
+                    </td>
+                    <td className="p-1.5 border-r border-slate-300 text-[11px] text-slate-700">
+                      {specSummary}
+                    </td>
+                    <td className="p-1.5 border-r border-slate-300 font-mono text-slate-700">
+                      {item.material || '-'}
+                    </td>
+                    <td className="p-1.5 border-r border-slate-300 text-center font-mono">
+                      {item.quantity} {item.unit || '台'}
+                    </td>
+                    <td className="p-1.5 text-[11px] font-mono text-slate-700">
+                      {item.deliveryDate || '-'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Section 3: Notes / Technical Instructions */}
+        <div className="mb-4">
+          <div className="text-xs font-bold bg-slate-200/80 px-2.5 py-1 text-slate-800 border-l-4 border-slate-700 mb-1.5">
+            3. 特記事項・技術指示事項
+          </div>
+          <div className="border border-slate-300 rounded p-3 text-xs text-slate-800 bg-white leading-relaxed min-h-[64px] whitespace-pre-wrap">
+            {formValues['f-notes'] || activeTemplate?.notesTemplate || '指定の検査成績書およびミルシートは納品書に同封の上、1部提出すること。製品銘板には必ず機器番号（Tag No.）を打刻すること。'}
+          </div>
+        </div>
+
+        {/* Footer with Seal boxes */}
+        <div className="flex items-end justify-between pt-4 border-t border-slate-200 mt-6 text-xs text-slate-500">
+          <div className="text-[11px]">
+            <div>※ 本書はSpecForgeシステムにより電子生成された正式調達仕様書です。</div>
+            <div className="font-mono text-[10px]">DocID: {fixedDocNo} | Generated: {new Date().toISOString()}</div>
+          </div>
+          <table className="border-collapse border border-slate-400 text-center text-[10px] w-48">
+            <thead>
+              <tr className="bg-slate-100 border-b border-slate-400">
+                <th className="p-1 border-r border-slate-300 font-normal">承認</th>
+                <th className="p-1 border-r border-slate-300 font-normal">審査</th>
+                <th className="p-1 font-normal">担当</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="h-10">
+                <td className="border-r border-slate-300"></td>
+                <td className="border-r border-slate-300"></td>
+                <td className="font-sans text-slate-700 pt-3">印</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

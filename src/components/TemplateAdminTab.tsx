@@ -23,28 +23,34 @@ import {
   ArrowRight,
   HardDrive
 } from 'lucide-react';
-import { SpecTemplate, SpecFieldMapping, TableColumnMapping, SpecMappingAssetFile } from '../types';
+import { SpecTemplate, SpecFieldMapping, TableColumnMapping, SpecMappingAssetFile, EquipmentItem, ProjectWorkspace } from '../types';
 import { exportMappingAssetAsJson, importMappingAssetFromJson, createDefaultMasterWorkbook } from '../utils/exceljsEngine';
 
 interface TemplateAdminTabProps {
   templates: SpecTemplate[];
   onUpdateTemplates: (updated: SpecTemplate[]) => void;
+  items?: EquipmentItem[];
+  currentProject?: ProjectWorkspace;
   activeTemplateId?: string;
   onSelectTemplate?: (id: string) => void;
+  onBackToDashboard?: () => void;
 }
 
 export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
   templates,
   onUpdateTemplates,
+  items,
+  currentProject,
   activeTemplateId,
-  onSelectTemplate
+  onSelectTemplate,
+  onBackToDashboard
 }) => {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>(
     activeTemplateId || templates[0]?.id || ''
   );
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [editingTemplate, setEditingTemplate] = useState<SpecTemplate | null>(null);
-  const [activeTabSub, setActiveTabSub] = useState<'fields' | 'table' | 'asset'>('fields');
+  const [activeTabSub, setActiveTabSub] = useState<'fields' | 'basic' | 'table' | 'asset'>('fields');
   const [message, setMessage] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
 
@@ -53,10 +59,63 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
 
   const currentTemplate = templates.find(t => t.id === selectedTemplateId) || templates[0];
 
+  // Extract distinct specification item names registered in the equipment database
+  const availableSpecNames = React.useMemo(() => {
+    const set = new Set<string>();
+    const baseline = [
+      '口径',
+      '材質',
+      '流体',
+      '設計圧力',
+      '設計温度',
+      '接続規格',
+      '塗装仕様',
+      '耐圧試験',
+      '電動機出力',
+      '電源・電圧',
+      '周波数',
+      '防爆構造',
+      '納期',
+      '特記事項'
+    ];
+    baseline.forEach(b => set.add(b));
+
+    if (items) {
+      for (const it of items) {
+        if (it.specs && Array.isArray(it.specs)) {
+          for (const sp of it.specs) {
+            if (sp.name && sp.name.trim()) {
+              set.add(sp.name.trim());
+            }
+          }
+        }
+      }
+    }
+
+    return Array.from(set);
+  }, [items]);
+
   // Start editing a template
   const handleStartEdit = (tpl: SpecTemplate) => {
     const clone: SpecTemplate = JSON.parse(JSON.stringify(tpl));
     if (!clone.fields) clone.fields = [];
+    
+    // Ensure baseline basic fields exist if missing
+    const hasBasic = (clone.fields || []).some(f => f.group === 'basic');
+    if (!hasBasic) {
+      const defaultBasics: SpecFieldMapping[] = [
+        { id: `f-basic-title`, label: '案件名', cell: 'C5', type: 'text', group: 'basic', defaultValue: '設備工事' },
+        { id: `f-basic-code`, label: '案件コード', cell: 'C4', type: 'text', group: 'basic', defaultValue: currentProject?.code || 'PRJ-2026-01' },
+        { id: `f-basic-order`, label: 'オーダーNo.', cell: 'C3', type: 'text', group: 'basic', defaultValue: currentProject?.orderNo || '202500444' },
+        { id: `f-basic-client`, label: '客先名', cell: 'G6', type: 'text', group: 'basic', defaultValue: currentProject?.clientName || '〇〇市水道局' },
+        { id: `f-basic-docno`, label: '仕様書番号', cell: 'C4', type: 'text', group: 'basic', defaultValue: 'SPEC-2026-001' },
+        { id: `f-basic-date`, label: '発行日', cell: 'G4', type: 'date', group: 'basic', defaultValue: new Date().toISOString().slice(0, 10) },
+        { id: `f-basic-issuer`, label: '発行元', cell: 'G5', type: 'text', group: 'basic', defaultValue: '設計部' },
+        { id: `f-basic-notes`, label: '特記事項', cell: 'B23', type: 'textarea', group: 'basic', defaultValue: '特記事項なし。' }
+      ];
+      clone.fields = [...defaultBasics, ...(clone.fields || [])];
+    }
+
     if (!clone.tableMapping) {
       clone.tableMapping = {
         startRow: 15,
@@ -264,16 +323,56 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
   };
 
   // Field manipulation helpers for editingTemplate
-  const handleAddField = () => {
+  const handleAddSpecField = () => {
     if (!editingTemplate) return;
+    const labelChoice = availableSpecNames[0] || '口径';
     const newField: SpecFieldMapping = {
-      id: `f-${Date.now()}`,
-      label: '新規項目',
+      id: `f-spec-${Date.now()}`,
+      label: labelChoice,
       cell: 'C11',
       type: 'text',
       group: 'spec',
       defaultValue: '',
       description: ''
+    };
+    setEditingTemplate({
+      ...editingTemplate,
+      fields: [...(editingTemplate.fields || []), newField]
+    });
+  };
+
+  const handleAddCheckboxField = () => {
+    if (!editingTemplate) return;
+    const newField: SpecFieldMapping = {
+      id: `f-check-${Date.now()}`,
+      label: '耐圧・漏れ検査',
+      cell: 'B8',
+      labelCell: 'C8',
+      type: 'checkbox',
+      group: 'check',
+      defaultValue: true,
+      checkboxConfig: {
+        checkedValue: '☑ 要',
+        uncheckedValue: '☐ 不要',
+        labelTrue: '要',
+        labelFalse: '不要'
+      }
+    };
+    setEditingTemplate({
+      ...editingTemplate,
+      fields: [...(editingTemplate.fields || []), newField]
+    });
+  };
+
+  const handleAddBasicField = () => {
+    if (!editingTemplate) return;
+    const newField: SpecFieldMapping = {
+      id: `f-basic-${Date.now()}`,
+      label: '案件名',
+      cell: 'C5',
+      type: 'text',
+      group: 'basic',
+      defaultValue: ''
     };
     setEditingTemplate({
       ...editingTemplate,
@@ -298,6 +397,18 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
   };
 
   const activeTpl = isEditing ? editingTemplate! : currentTemplate;
+
+  const specFields = React.useMemo(() => {
+    return (activeTpl.fields || []).filter(f => f.type !== 'checkbox' && f.group !== 'basic');
+  }, [activeTpl.fields]);
+
+  const checkboxFields = React.useMemo(() => {
+    return (activeTpl.fields || []).filter(f => f.type === 'checkbox' || f.group === 'check');
+  }, [activeTpl.fields]);
+
+  const basicFields = React.useMemo(() => {
+    return (activeTpl.fields || []).filter(f => f.group === 'basic');
+  }, [activeTpl.fields]);
 
   return (
     <div className="space-y-4">
@@ -510,21 +621,32 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
             </div>
 
             {/* Sub Tabs */}
-            <div className="flex border-b border-slate-200 pt-1 text-xs">
+            <div className="flex border-b border-slate-200 pt-1 text-xs overflow-x-auto">
               <button
                 onClick={() => setActiveTabSub('fields')}
-                className={`px-4 py-2 font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
+                className={`px-4 py-2 font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
                   activeTabSub === 'fields'
                     ? 'border-indigo-600 text-indigo-700'
                     : 'border-transparent text-slate-500 hover:text-slate-800'
                 }`}
               >
                 <Target className="w-3.5 h-3.5" />
-                <span>セル番地マッピング・チェック項目定義 ({activeTpl.fields?.length || 0})</span>
+                <span>セル番地マッピング・チェック項目定義 ({specFields.length + checkboxFields.length})</span>
+              </button>
+              <button
+                onClick={() => setActiveTabSub('basic')}
+                className={`px-4 py-2 font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+                  activeTabSub === 'basic'
+                    ? 'border-indigo-600 text-indigo-700'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>基本情報マッピング ({basicFields.length})</span>
               </button>
               <button
                 onClick={() => setActiveTabSub('table')}
-                className={`px-4 py-2 font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
+                className={`px-4 py-2 font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
                   activeTabSub === 'table'
                     ? 'border-indigo-600 text-indigo-700'
                     : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -535,7 +657,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
               </button>
               <button
                 onClick={() => setActiveTabSub('asset')}
-                className={`px-4 py-2 font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
+                className={`px-4 py-2 font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
                   activeTabSub === 'asset'
                     ? 'border-indigo-600 text-indigo-700'
                     : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -549,43 +671,286 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
 
           {/* Sub Tab 1: Fields & Cell Address Mapping */}
           {activeTabSub === 'fields' && (
+            <div className="space-y-4">
+              {/* Section 1: Specification fields */}
+              <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <div>
+                    <h2 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <Target className="w-4 h-4 text-indigo-600" />
+                      <span>機器仕様項目 セル番地マッピング ({specFields.length}項目)</span>
+                    </h2>
+                    <p className="text-[11px] text-slate-500">
+                      機器データベースに登録されている仕様項目名（口径、材質、圧力等）をプルダウンで選択し、Excel原本の転記先セル番地を指定します。
+                    </p>
+                  </div>
+
+                  {isEditing && (
+                    <button
+                      onClick={handleAddSpecField}
+                      className="px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md shadow-xs flex items-center gap-1 transition-all cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>仕様項目を追加</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
+                      <tr>
+                        <th className="p-2 w-56">項目ラベル (機器仕様項目から選択)</th>
+                        <th className="p-2 w-32">セル番地</th>
+                        <th className="p-2">プレビュー初期値 / 説明</th>
+                        {isEditing && <th className="p-2 text-right w-14">操作</th>}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {specFields.map((field) => {
+                        if (!isEditing) {
+                          return (
+                            <tr key={field.id} className="hover:bg-slate-50/70">
+                              <td className="p-2 font-semibold text-slate-900">
+                                {field.label}
+                              </td>
+                              <td className="p-2 font-mono font-bold text-indigo-700">
+                                {field.cell}
+                              </td>
+                              <td className="p-2 text-[11px] text-slate-500">
+                                {String(field.defaultValue || field.placeholder || '-')}
+                              </td>
+                            </tr>
+                          );
+                        }
+
+                        return (
+                          <tr key={field.id} className="bg-indigo-50/20 hover:bg-indigo-50/40">
+                            <td className="p-2">
+                              <select
+                                value={field.label}
+                                onChange={(e) => handleUpdateField(field.id, { label: e.target.value })}
+                                className="w-full text-xs font-semibold bg-white border border-slate-300 rounded px-2 py-1.5 text-slate-900 focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+                              >
+                                <option value="">-- 仕様項目を選択 --</option>
+                                {availableSpecNames.map(name => (
+                                  <option key={name} value={name}>{name}</option>
+                                ))}
+                                {!availableSpecNames.includes(field.label) && field.label && (
+                                  <option value={field.label}>{field.label} (登録外)</option>
+                                )}
+                              </select>
+                            </td>
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                value={field.cell}
+                                onChange={(e) => handleUpdateField(field.id, { cell: e.target.value.toUpperCase() })}
+                                className="w-full text-xs font-mono font-bold bg-white border border-indigo-300 rounded px-2 py-1 text-indigo-800"
+                                placeholder="C8, E30..."
+                              />
+                            </td>
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                value={String(field.defaultValue ?? '')}
+                                onChange={(e) => handleUpdateField(field.id, { defaultValue: e.target.value })}
+                                placeholder="初期値またはプレースホルダー"
+                                className="w-full text-xs bg-white border border-slate-300 rounded px-2 py-1"
+                              />
+                            </td>
+                            <td className="p-2 text-right">
+                              <button
+                                onClick={() => handleDeleteField(field.id)}
+                                className="p-1 text-slate-400 hover:text-red-600 rounded transition-colors cursor-pointer"
+                                title="この項目を削除"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Section 2: Checkbox Settings (別途チェックボックス設定の欄を設ける) */}
+              <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <div>
+                    <h2 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <CheckSquare className="w-4 h-4 text-emerald-600" />
+                      <span>チェックボックス設定 (適用要件・指定基準) ({checkboxFields.length}項目)</span>
+                    </h2>
+                    <p className="text-[11px] text-slate-500">
+                      チェックボックス（☑ / ☐）を入れたいセル番地と、その項目名が記載されるセル番地をマッピングします。
+                    </p>
+                  </div>
+
+                  {isEditing && (
+                    <button
+                      onClick={handleAddCheckboxField}
+                      className="px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-md shadow-xs flex items-center gap-1 transition-all cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>チェックボックスを追加</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
+                      <tr>
+                        <th className="p-2 w-36">チェックボックスのセル番地</th>
+                        <th className="p-2 w-36">項目のセル番地</th>
+                        <th className="p-2 w-48">チェック項目名</th>
+                        <th className="p-2">流し込み値 (ON / OFF)</th>
+                        {isEditing && <th className="p-2 text-right w-14">操作</th>}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {checkboxFields.map((field) => {
+                        if (!isEditing) {
+                          return (
+                            <tr key={field.id} className="hover:bg-slate-50/70">
+                              <td className="p-2 font-mono font-bold text-emerald-700">
+                                {field.cell}
+                              </td>
+                              <td className="p-2 font-mono text-slate-700">
+                                {field.labelCell || '-'}
+                              </td>
+                              <td className="p-2 font-semibold text-slate-900">
+                                {field.label}
+                              </td>
+                              <td className="p-2 text-[11px] font-mono text-slate-600">
+                                ON: <span className="text-emerald-700 font-semibold">{field.checkboxConfig?.checkedValue || '☑ 要'}</span> / 
+                                OFF: <span className="text-slate-400">{field.checkboxConfig?.uncheckedValue || '☐ 不要'}</span>
+                              </td>
+                            </tr>
+                          );
+                        }
+
+                        return (
+                          <tr key={field.id} className="bg-emerald-50/20 hover:bg-emerald-50/40">
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                value={field.cell}
+                                onChange={(e) => handleUpdateField(field.id, { cell: e.target.value.toUpperCase() })}
+                                className="w-full text-xs font-mono font-bold bg-white border border-emerald-300 rounded px-2 py-1 text-emerald-800"
+                                placeholder="B8, D8..."
+                              />
+                            </td>
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                value={field.labelCell || ''}
+                                onChange={(e) => handleUpdateField(field.id, { labelCell: e.target.value.toUpperCase() })}
+                                className="w-full text-xs font-mono bg-white border border-slate-300 rounded px-2 py-1 text-slate-800"
+                                placeholder="C8, E8..."
+                              />
+                            </td>
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                value={field.label}
+                                onChange={(e) => handleUpdateField(field.id, { label: e.target.value })}
+                                className="w-full text-xs font-semibold bg-white border border-slate-300 rounded px-2 py-1 text-slate-900"
+                                placeholder="耐圧・漏れ検査"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                                <input
+                                  type="text"
+                                  value={field.checkboxConfig?.checkedValue ?? '☑ 要'}
+                                  onChange={(e) => handleUpdateField(field.id, {
+                                    checkboxConfig: {
+                                      checkedValue: e.target.value,
+                                      uncheckedValue: field.checkboxConfig?.uncheckedValue || '☐ 不要',
+                                      labelTrue: field.checkboxConfig?.labelTrue || '要',
+                                      labelFalse: field.checkboxConfig?.labelFalse || '不要'
+                                    }
+                                  })}
+                                  placeholder="ON時: ☑ 要"
+                                  className="w-full text-xs bg-white border border-emerald-300 rounded px-1.5 py-0.5"
+                                />
+                                <input
+                                  type="text"
+                                  value={field.checkboxConfig?.uncheckedValue ?? '☐ 不要'}
+                                  onChange={(e) => handleUpdateField(field.id, {
+                                    checkboxConfig: {
+                                      checkedValue: field.checkboxConfig?.checkedValue || '☑ 要',
+                                      uncheckedValue: e.target.value,
+                                      labelTrue: field.checkboxConfig?.labelTrue || '要',
+                                      labelFalse: field.checkboxConfig?.labelFalse || '不要'
+                                    }
+                                  })}
+                                  placeholder="OFF時: ☐ 不要"
+                                  className="w-full text-xs bg-white border border-slate-300 rounded px-1.5 py-0.5"
+                                />
+                              </div>
+                            </td>
+                            <td className="p-2 text-right">
+                              <button
+                                onClick={() => handleDeleteField(field.id)}
+                                className="p-1 text-slate-400 hover:text-red-600 rounded transition-colors cursor-pointer"
+                                title="このチェックボックス設定を削除"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Sub Tab: Basic Info Mapping (基本情報マッピング) */}
+          {activeTabSub === 'basic' && (
             <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-4">
               <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                 <div>
-                  <h2 className="text-xs font-bold text-slate-900">
-                    入力項目 ＆ セル番地マッピング一覧
+                  <h2 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                    <Layers className="w-4 h-4 text-indigo-600" />
+                    <span>基本情報 ＆ 案件名セルマッピング ({basicFields.length}項目)</span>
                   </h2>
                   <p className="text-[11px] text-slate-500">
-                    一般ユーザー画面にはセル番地は隠蔽され、ラベルとフォームコントロール（テキスト、プルダウン、チェック）のみが表示されます。
+                    案件名、工事コード、オーダーNo.、客先名、仕様書番号などの案件基本情報をExcel原本のどのセルへ書き込むかを設定します。
                   </p>
                 </div>
 
                 {isEditing && (
                   <button
-                    onClick={handleAddField}
+                    onClick={handleAddBasicField}
                     className="px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md shadow-xs flex items-center gap-1 transition-all cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>項目を追加</span>
+                    <span>基本情報項目を追加</span>
                   </button>
                 )}
               </div>
 
-              {/* Fields Table */}
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
                     <tr>
-                      <th className="p-2 w-36">項目ラベル (画面表示)</th>
-                      <th className="p-2 w-24">セル番地</th>
-                      <th className="p-2 w-28">入力形式</th>
-                      <th className="p-2">設定（プルダウン選択肢 / チェック流し込み値）</th>
-                      <th className="p-2 w-20">グループ</th>
+                      <th className="p-2 w-48">基本情報項目</th>
+                      <th className="p-2 w-32">セル番地</th>
+                      <th className="p-2 w-40">連動元</th>
+                      <th className="p-2">プレビュー初期値</th>
                       {isEditing && <th className="p-2 text-right w-14">操作</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {(activeTpl.fields || []).map((field, idx) => {
+                    {basicFields.map((field) => {
                       if (!isEditing) {
                         return (
                           <tr key={field.id} className="hover:bg-slate-50/70">
@@ -595,44 +960,38 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                             <td className="p-2 font-mono font-bold text-indigo-700">
                               {field.cell}
                             </td>
-                            <td className="p-2">
-                              <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded text-[11px] font-mono">
-                                {field.type === 'checkbox' ? '☑ チェック' : field.type === 'select' ? '▼ プルダウン' : field.type === 'textarea' ? '¶ 複数行' : 'テキスト'}
-                              </span>
+                            <td className="p-2 text-[11px] text-slate-500">
+                              案件サマリー一律反映
                             </td>
                             <td className="p-2 text-[11px] text-slate-600">
-                              {field.type === 'checkbox' ? (
-                                <div className="font-mono text-slate-700">
-                                  ON: <span className="text-emerald-700 font-semibold">{field.checkboxConfig?.checkedValue || '☑ 要'}</span> / 
-                                  OFF: <span className="text-slate-400">{field.checkboxConfig?.uncheckedValue || '☐ 不要'}</span>
-                                </div>
-                              ) : field.type === 'select' ? (
-                                <div className="text-slate-600 truncate max-w-xs">
-                                  選択肢 ({field.options?.length || 0}個): {field.options?.join(', ')}
-                                </div>
-                              ) : (
-                                <div className="text-slate-400 italic">
-                                  初期値: {String(field.defaultValue || '-')}
-                                </div>
-                              )}
-                            </td>
-                            <td className="p-2 text-[11px] font-mono text-slate-500">
-                              {field.group || 'basic'}
+                              {String(field.defaultValue || '-')}
                             </td>
                           </tr>
                         );
                       }
 
-                      // Edit mode row
                       return (
                         <tr key={field.id} className="bg-indigo-50/20 hover:bg-indigo-50/40">
                           <td className="p-2">
-                            <input
-                              type="text"
+                            <select
                               value={field.label}
                               onChange={(e) => handleUpdateField(field.id, { label: e.target.value })}
                               className="w-full text-xs font-semibold bg-white border border-slate-300 rounded px-2 py-1 text-slate-900"
-                            />
+                            >
+                              <option value="案件名">案件名 (工事名称)</option>
+                              <option value="案件コード">案件コード (工事番号)</option>
+                              <option value="オーダーNo.">オーダーNo.</option>
+                              <option value="客先名">客先名 (発注者)</option>
+                              <option value="客先番号">客先番号</option>
+                              <option value="工事場所">工事場所</option>
+                              <option value="仕様書番号">仕様書番号</option>
+                              <option value="発行日">発行日</option>
+                              <option value="発行元">発行元 (部署)</option>
+                              <option value="特記事項">特記事項</option>
+                              {!['案件名', '案件コード', 'オーダーNo.', '客先名', '客先番号', '工事場所', '仕様書番号', '発行日', '発行元', '特記事項'].includes(field.label) && (
+                                <option value={field.label}>{field.label}</option>
+                              )}
+                            </select>
                           </td>
                           <td className="p-2">
                             <input
@@ -640,116 +999,28 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                               value={field.cell}
                               onChange={(e) => handleUpdateField(field.id, { cell: e.target.value.toUpperCase() })}
                               className="w-full text-xs font-mono font-bold bg-white border border-indigo-300 rounded px-2 py-1 text-indigo-800"
-                              placeholder="C8, E30..."
+                              placeholder="C5, C4..."
                             />
                           </td>
-                          <td className="p-2">
-                            <select
-                              value={field.type}
-                              onChange={(e) => {
-                                const newType = e.target.value as any;
-                                const patch: Partial<SpecFieldMapping> = { type: newType };
-                                if (newType === 'checkbox' && !field.checkboxConfig) {
-                                  patch.checkboxConfig = {
-                                    checkedValue: '☑ 要',
-                                    uncheckedValue: '☐ 不要',
-                                    labelTrue: '要',
-                                    labelFalse: '不要'
-                                  };
-                                } else if (newType === 'select' && (!field.options || field.options.length === 0)) {
-                                  patch.options = ['選択肢1', '選択肢2'];
-                                }
-                                handleUpdateField(field.id, patch);
-                              }}
-                              className="w-full text-xs bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 cursor-pointer"
-                            >
-                              <option value="text">テキスト</option>
-                              <option value="textarea">複数行テキスト</option>
-                              <option value="select">プルダウン選択</option>
-                              <option value="checkbox">チェック形式</option>
-                              <option value="date">日付</option>
-                            </select>
+                          <td className="p-2 text-[11px] text-slate-500 font-mono">
+                            案件サマリー一律反映
                           </td>
                           <td className="p-2">
-                            {field.type === 'checkbox' ? (
-                              <div className="grid grid-cols-2 gap-1.5 text-[11px]">
-                                <div>
-                                  <span className="text-[10px] text-slate-500 block">ON時の書き込み値:</span>
-                                  <input
-                                    type="text"
-                                    value={field.checkboxConfig?.checkedValue ?? '☑ 要'}
-                                    onChange={(e) => handleUpdateField(field.id, {
-                                      checkboxConfig: {
-                                        checkedValue: e.target.value,
-                                        uncheckedValue: field.checkboxConfig?.uncheckedValue || '☐ 不要',
-                                        labelTrue: field.checkboxConfig?.labelTrue || '要',
-                                        labelFalse: field.checkboxConfig?.labelFalse || '不要'
-                                      }
-                                    })}
-                                    className="w-full text-xs bg-white border border-emerald-300 rounded px-1.5 py-0.5"
-                                  />
-                                </div>
-                                <div>
-                                  <span className="text-[10px] text-slate-500 block">OFF時の書き込み値:</span>
-                                  <input
-                                    type="text"
-                                    value={field.checkboxConfig?.uncheckedValue ?? '☐ 不要'}
-                                    onChange={(e) => handleUpdateField(field.id, {
-                                      checkboxConfig: {
-                                        checkedValue: field.checkboxConfig?.checkedValue || '☑ 要',
-                                        uncheckedValue: e.target.value,
-                                        labelTrue: field.checkboxConfig?.labelTrue || '要',
-                                        labelFalse: field.checkboxConfig?.labelFalse || '不要'
-                                      }
-                                    })}
-                                    className="w-full text-xs bg-white border border-slate-300 rounded px-1.5 py-0.5"
-                                  />
-                                </div>
-                              </div>
-                            ) : field.type === 'select' ? (
-                              <div>
-                                <span className="text-[10px] text-slate-500 block">選択肢 (カンマ区切り):</span>
-                                <input
-                                  type="text"
-                                  value={field.options?.join(', ') || ''}
-                                  onChange={(e) => handleUpdateField(field.id, {
-                                    options: e.target.value.split(',').map(s => s.trim()).filter(Boolean)
-                                  })}
-                                  className="w-full text-xs bg-white border border-slate-300 rounded px-2 py-1"
-                                  placeholder="選択肢A, 選択肢B, 選択肢C..."
-                                />
-                              </div>
-                            ) : (
-                              <div>
-                                <span className="text-[10px] text-slate-500 block">初期値:</span>
-                                <input
-                                  type="text"
-                                  value={String(field.defaultValue ?? '')}
-                                  onChange={(e) => handleUpdateField(field.id, { defaultValue: e.target.value })}
-                                  className="w-full text-xs bg-white border border-slate-300 rounded px-2 py-1"
-                                />
-                              </div>
-                            )}
-                          </td>
-                          <td className="p-2">
-                            <select
-                              value={field.group || 'basic'}
-                              onChange={(e) => handleUpdateField(field.id, { group: e.target.value as any })}
-                              className="w-full text-xs bg-white border border-slate-300 rounded px-1.5 py-1"
-                            >
-                              <option value="basic">基本情報</option>
-                              <option value="spec">仕様条件</option>
-                              <option value="check">チェック要件</option>
-                              <option value="notes">特記事項</option>
-                            </select>
+                            <input
+                              type="text"
+                              value={String(field.defaultValue ?? '')}
+                              onChange={(e) => handleUpdateField(field.id, { defaultValue: e.target.value })}
+                              placeholder="初期値"
+                              className="w-full text-xs bg-white border border-slate-300 rounded px-2 py-1"
+                            />
                           </td>
                           <td className="p-2 text-right">
                             <button
                               onClick={() => handleDeleteField(field.id)}
-                              className="p-1 text-slate-400 hover:text-red-600 rounded transition-colors"
-                              title="項目を削除"
+                              className="p-1 text-slate-400 hover:text-red-600 rounded transition-colors cursor-pointer"
+                              title="この基本情報マッピングを削除"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           </td>
                         </tr>

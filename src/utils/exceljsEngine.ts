@@ -239,6 +239,11 @@ export async function fillSpecificationExcel(
         ? (field.checkboxConfig?.checkedValue || '☑ 要') 
         : (field.checkboxConfig?.uncheckedValue || '☐ 不要');
       cell.value = outputText;
+
+      if (field.labelCell && field.label) {
+        const lCell = worksheet.getCell(field.labelCell.trim().toUpperCase());
+        lCell.value = field.label;
+      }
     } else if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
       cell.value = String(rawVal);
     } else if (field.defaultValue !== undefined && field.defaultValue !== '') {
@@ -553,6 +558,10 @@ export async function renderSpecificationExcelGrid(
       cell.value = isChecked 
         ? (field.checkboxConfig?.checkedValue || '☑ 要') 
         : (field.checkboxConfig?.uncheckedValue || '☐ 不要');
+      if (field.labelCell && field.label) {
+        const lCell = worksheet.getCell(field.labelCell.trim().toUpperCase());
+        lCell.value = field.label;
+      }
     } else if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
       cell.value = String(rawVal);
     } else if (field.defaultValue !== undefined && field.defaultValue !== '') {
