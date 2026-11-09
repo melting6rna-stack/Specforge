@@ -404,6 +404,9 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
             <h1 className="text-base font-bold text-slate-900 flex items-center gap-1.5">
               <span>仕様書リアルタイム生成 ＆ セル転記スタジオ</span>
             </h1>
+            <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-2 py-0.5 rounded">
+              （編集中）
+            </span>
             <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded font-mono font-semibold flex items-center gap-1">
               <Zap className="w-3 h-3 text-emerald-600 fill-emerald-600" />
               <span>Excel原本直接描画（本採用）</span>
@@ -466,6 +469,9 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
               <label className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
                 <FileText className="w-4 h-4 text-indigo-600" />
                 <span>仕様書テンプレートの選択</span>
+                <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.2 rounded">
+                  （編集中）
+                </span>
               </label>
               
               <div className="flex items-center gap-2">
@@ -498,7 +504,7 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
             >
               {templates.map(t => (
                 <option key={t.id} value={t.id}>
-                  {t.name} ({t.code})
+                  {t.name} ({t.code}){t.id === selectedTemplateId ? '（編集中）' : ''}
                 </option>
               ))}
             </select>
@@ -547,8 +553,11 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
 
             {/* Primary Equipment Chooser */}
             <div>
-              <label className="text-[11px] font-semibold text-slate-700 block mb-1">
-                主仕様の転記元機器（フォーカス機器）:
+              <label className="text-[11px] font-semibold text-slate-700 flex items-center justify-between mb-1">
+                <span>主仕様の転記元機器（フォーカス機器）:</span>
+                <span className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded font-bold">
+                  （編集中）
+                </span>
               </label>
               <select
                 value={primaryItemId}
@@ -557,7 +566,7 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
               >
                 {projectItems.map(it => (
                   <option key={it.id} value={it.id}>
-                    [{it.tagNo || '未割当'}] {it.name} ({it.quantity} {it.unit || '台'})
+                    [{it.tagNo || '未割当'}] {it.name} ({it.quantity} {it.unit || '台'}){it.id === primaryItemId ? '（編集中）' : ''}
                   </option>
                 ))}
               </select>
@@ -972,6 +981,9 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                 <div>
                   <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
                     <span>Excel原本 直接描画ビュー</span>
+                    <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 rounded">
+                      （編集中）
+                    </span>
                     <span className="text-[10px] bg-emerald-100 text-emerald-800 font-semibold px-2 py-0.5 rounded">
                       原本セル直接連動
                     </span>

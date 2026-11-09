@@ -688,38 +688,6 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
                   />
                 </div>
 
-                {/* 客先番号: 【】-【】 */}
-                <div className="sm:col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-1 flex items-center justify-between">
-                    <span>客先番号</span>
-                    <span className="text-[10px] text-slate-400 font-normal font-mono">【】-【】形式</span>
-                  </label>
-                  <div className="flex items-center gap-1">
-                    <div className="flex-1 flex items-center bg-white border border-slate-300 rounded px-2 py-1.5 focus-within:ring-1 focus-within:ring-slate-900 focus-within:border-slate-900 transition-all">
-                      <span className="text-slate-600 font-bold select-none text-xs font-sans mr-0.5">【</span>
-                      <input
-                        type="text"
-                        placeholder="客先記号 (例: MC)"
-                        value={newClientNumberPart1}
-                        onChange={(e) => setNewClientNumberPart1(e.target.value)}
-                        className="w-full text-xs font-mono font-bold text-center border-0 p-0 text-slate-900 focus:outline-hidden"
-                      />
-                      <span className="text-slate-600 font-bold select-none text-xs font-sans ml-0.5">】</span>
-                    </div>
-                    <span className="text-slate-400 font-bold select-none text-sm">-</span>
-                    <div className="flex-1 flex items-center bg-white border border-slate-300 rounded px-2 py-1.5 focus-within:ring-1 focus-within:ring-slate-900 focus-within:border-slate-900 transition-all">
-                      <span className="text-slate-600 font-bold select-none text-xs font-sans mr-0.5">【</span>
-                      <input
-                        type="text"
-                        placeholder="番号 (例: 09821)"
-                        value={newClientNumberPart2}
-                        onChange={(e) => setNewClientNumberPart2(e.target.value)}
-                        className="w-full text-xs font-mono font-bold text-center border-0 p-0 text-slate-900 focus:outline-hidden"
-                      />
-                      <span className="text-slate-600 font-bold select-none text-xs font-sans ml-0.5">】</span>
-                    </div>
-                  </div>
-                </div>
 
                 <div className="sm:col-span-2">
                   <label className="block font-semibold text-slate-700 mb-1">案件概要・特記事項</label>
@@ -786,26 +754,6 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
                   className="hidden"
                 />
 
-                {/* Tokki Schema v1.1 Download & Helper */}
-                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2">
-                    <FileCode className="w-4 h-4 text-indigo-600 shrink-0" />
-                    <div>
-                      <span className="font-semibold text-slate-800">特記仕様書スキーマ(v1.1 改定版)</span>
-                      <p className="text-[10px] text-slate-500">
-                        Copilot等のエージェントでJSONを生成する際に読み込ませるスキーマ定義（塗装仕様・案件カテゴリ・変更履歴ログに対応）
-                      </p>
-                    </div>
-                  </div>
-                  <a
-                    href="/assets/aistudio/tokki_equipment_v1_1.schema.json"
-                    download="tokki_equipment_v1_1.schema.json"
-                    className="px-2.5 py-1 text-[11px] font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded hover:bg-indigo-100 flex items-center gap-1 shrink-0 transition-colors"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>スキーマDL</span>
-                  </a>
-                </div>
 
                 {/* Binding Selected Status */}
                 {selectedFileName ? (
