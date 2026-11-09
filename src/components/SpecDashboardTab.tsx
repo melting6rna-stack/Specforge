@@ -106,10 +106,31 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
       const labelClean = f.label.toLowerCase();
 
       // Project common fields take precedence from currentProject
-      if (f.id === 'f-project-name' || labelClean.includes('工事名称') || labelClean.includes('件名')) {
+      if (f.id === 'f-order-no' || labelClean.includes('オーダー') || labelClean.includes('注文番号') || labelClean.includes('オーダーno')) {
+        if (currentProject?.orderNo) {
+          newVals[f.id] = currentProject.orderNo;
+          matched[f.id] = `案件共通(オーダーNo): ${currentProject.orderNo}`;
+          continue;
+        }
+      }
+      if (f.id === 'f-project-code' || labelClean.includes('工事コード') || labelClean.includes('案件コード') || labelClean.includes('工事番号')) {
+        if (currentProject?.code) {
+          newVals[f.id] = currentProject.code;
+          matched[f.id] = `案件共通(工事コード): ${currentProject.code}`;
+          continue;
+        }
+      }
+      if (f.id === 'f-project-name' || labelClean.includes('工事名称') || labelClean.includes('件名') || labelClean.includes('案件名')) {
         newVals[f.id] = currentProject?.name || newVals[f.id] || '設備工事';
-        matched[f.id] = `案件共通: ${currentProject?.name || ''}`;
+        matched[f.id] = `案件共通(案件名): ${currentProject?.name || ''}`;
         continue;
+      }
+      if (f.id === 'f-client-name' || labelClean.includes('客先名') || labelClean.includes('発注者') || labelClean.includes('顧客名')) {
+        if (currentProject?.clientName) {
+          newVals[f.id] = currentProject.clientName;
+          matched[f.id] = `案件共通(客先名): ${currentProject.clientName}`;
+          continue;
+        }
       }
       if (f.id === 'f-docno' || labelClean.includes('仕様書番号')) {
         newVals[f.id] = `${currentProject?.code || 'PRJ'}-${item.tagNo || 'EQ01'}-SPEC`;
@@ -295,13 +316,13 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
             <h1 className="text-base font-bold text-slate-900 flex items-center gap-1.5">
               <span>仕様書リアルタイム生成 ＆ セル転記スタジオ</span>
             </h1>
-            <span className="text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded font-mono font-semibold flex items-center gap-1">
-              <Zap className="w-3 h-3 text-amber-500 fill-amber-500" />
-              <span>ExcelJS 直接再描画検証中</span>
+            <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded font-mono font-semibold flex items-center gap-1">
+              <Zap className="w-3 h-3 text-emerald-600 fill-emerald-600" />
+              <span>Excel原本直接描画（本採用）</span>
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            機器仕様のセル転記・案件共通情報の一律反映・ブラウザ内でのExcel直接再描画性能を検証できます。
+            機器仕様のセル自動転記・案件共通情報の一律反映・Excel原本へのメモリ内直接再描画をリアルタイムでプレビューできます。
           </p>
         </div>
 
@@ -534,18 +555,24 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
 
             {/* Readonly / Uniform Project Info from Project Summary */}
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs space-y-1.5">
+              {currentProject?.orderNo && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-medium">オーダーNo.:</span>
+                  <span className="font-mono font-bold text-indigo-700">{currentProject.orderNo}</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 font-medium">案件コード (共通):</span>
+                <span className="font-mono font-bold text-slate-900">{currentProject?.code}</span>
+              </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-500 font-medium">案件名 (共通):</span>
                 <span className="font-bold text-slate-900 truncate max-w-xs">{currentProject?.name}</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-500 font-medium">工事コード (共通):</span>
-                <span className="font-mono font-bold text-indigo-700">{currentProject?.code}</span>
-              </div>
               {currentProject?.clientName && (
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-500 font-medium">発注者:</span>
-                  <span className="text-slate-800">{currentProject.clientName}</span>
+                  <span className="text-slate-500 font-medium">客先名 / 発注者:</span>
+                  <span className="text-slate-800 font-medium">{currentProject.clientName}</span>
                 </div>
               )}
               {(currentProject?.clientNumber || currentProject?.clientNumberPart1 || currentProject?.clientNumberPart2) && (
@@ -753,7 +780,7 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                   }`}
                 >
                   <Table className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>【検証】ExcelJS直接再描画ビュー</span>
+                  <span>Excel原本 直接描画ビュー（本実装）</span>
                 </button>
 
                 <button
@@ -792,19 +819,19 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
               </div>
             </div>
 
-            {/* Performance Benchmark Indicator Bar (User requested verification) */}
+            {/* Performance Benchmark Indicator Bar */}
             {previewMode === 'excel_grid' && (
               <div className="bg-slate-900 text-slate-200 rounded-lg px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
                   <span className="text-white font-bold">
-                    ⚡ ExcelJS メモリ内直接再描画:
+                    ⚡ ExcelJS メモリ内直接再描画（本採用）:
                   </span>
                   <span className="text-emerald-400 font-bold text-sm">
                     {excelGridData?.benchmarkMs ?? '--'} ms
                   </span>
                   <span className="text-slate-400 text-[11px] font-sans">
-                    （入力のたびに瞬時にセル解析更新 · 体感ラグなし）
+                    （入力のたびに原本セルを即時更新 · レイアウト崩れゼロ）
                   </span>
                 </div>
 

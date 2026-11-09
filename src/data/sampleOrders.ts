@@ -3,15 +3,18 @@ import { EquipmentItem, ProjectWorkspace, Category } from '../types';
 export const INITIAL_PROJECTS: ProjectWorkspace[] = [
   {
     id: 'prj-main',
-    name: '第1期 プラント配管・機械調達案件',
-    code: 'PRJ-2026-01',
-    clientName: '〇〇化学工業株式会社',
+    orderNo: '202500444',
+    code: '20345-001',
+    codePart1: '20345',
+    codePart2: '001',
+    name: '〇〇市水道工事 配水管敷設',
+    clientName: '〇〇市水道局',
     clientNumber: '【MC】-【09821】',
     clientNumberPart1: 'MC',
     clientNumberPart2: '09821',
-    location: '東部コンビナート 第1工場地区',
-    department: 'プラント施設技術部 機電課',
-    description: '工場配管更新に伴うバルブ・配管機器およびポンプ設備の調達',
+    location: '〇〇市中央通り 1工区',
+    department: '水道工務部 配水課',
+    description: '水道工事に伴うバルブ・配管機器およびポンプ設備の調達',
     createdAt: '2026-03-01'
   }
 ];

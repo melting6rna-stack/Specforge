@@ -151,9 +151,12 @@ export interface SpecMappingAssetFile {
 
 export interface ProjectWorkspace {
   id: string;
-  name: string; // 案件名・工事名称 (共通入力)
-  code: string; // 工事コード (共通入力)
-  clientName: string; // 発注者・顧客名
+  orderNo?: string; // オーダーNo. (例: 202500444)
+  name: string; // 案件名・工事名称 (共通入力, 例: 〇〇市水道工事)
+  code: string; // 案件コード (共通入力, 例: 20345-001)
+  codePart1?: string; // 案件コード 前半 (例: 20345)
+  codePart2?: string; // 案件コード 後半 (例: 001)
+  clientName: string; // 客先名・発注者 (例: 〇〇市水道局)
   clientNumber?: string; // 客先番号 (例: 【ABC】-【12345】)
   clientNumberPart1?: string; // 客先番号 前半 (記号)
   clientNumberPart2?: string; // 客先番号 後半 (番号)
