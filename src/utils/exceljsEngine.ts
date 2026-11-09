@@ -78,6 +78,18 @@ export async function createDefaultMasterWorkbook(template: SpecTemplate): Promi
   worksheet.getCell('G5').value = '設計部';
   worksheet.getCell('G5').font = { name: 'Meiryo UI', size: 9 };
 
+  // Row 6: Client Number & Client Name
+  worksheet.getCell('B6').value = '客先番号:';
+  worksheet.getCell('B6').font = { name: 'Meiryo UI', size: 9, color: { argb: 'FF64748B' } };
+  worksheet.mergeCells('C6:E6');
+  worksheet.getCell('C6').value = '【MC】-【09821】';
+  worksheet.getCell('C6').font = { name: 'Meiryo UI', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+
+  worksheet.getCell('F6').value = '発注元:';
+  worksheet.getCell('F6').font = { name: 'Meiryo UI', size: 9, color: { argb: 'FF64748B' } };
+  worksheet.getCell('G6').value = '〇〇化学工業株式会社';
+  worksheet.getCell('G6').font = { name: 'Meiryo UI', size: 9 };
+
   // Row 7: Section 1 Header
   worksheet.mergeCells('B7:H7');
   const sec1 = worksheet.getCell('B7');
@@ -414,5 +426,188 @@ export function importMappingAssetFromJson(jsonString: string): SpecMappingAsset
     tableMapping: parsed.tableMapping,
     masterFileName: parsed.masterFileName || parsed.originalFileName,
     masterWorkbookBase64: parsed.masterWorkbookBase64 || parsed.rawWorkbookBase64
+  };
+}
+
+export interface RenderedCellData {
+  address: string;
+  col: string;
+  row: number;
+  value: string;
+  isBold?: boolean;
+  fontSize?: number;
+  align?: 'left' | 'center' | 'right';
+  bgColor?: string;
+  hasBorder?: boolean;
+}
+
+export interface RenderedSheetGrid {
+  sheetName: string;
+  columns: { colLetter: string; width: number }[];
+  rows: {
+    rowNumber: number;
+    cells: RenderedCellData[];
+  }[];
+  totalCells: number;
+  benchmarkMs: number;
+}
+
+/**
+ * Real-time In-Memory Excel Renderer:
+ * Evaluates template updates in memory using ExcelJS on every keystroke/change,
+ * analyzes cell matrices, styles, and values, and returns grid representation with benchmark time.
+ */
+export async function renderSpecificationExcelGrid(
+  template: SpecTemplate,
+  formValues: Record<string, any>,
+  items: EquipmentItem[],
+  docInfo: Record<string, string>,
+  maxRows: number = 28
+): Promise<RenderedSheetGrid> {
+  const startTime = performance.now();
+
+  const workbook = new ExcelJS.Workbook();
+  if (template.rawWorkbookBase64 || template.masterWorkbookBase64) {
+    const base64 = template.rawWorkbookBase64 || template.masterWorkbookBase64!;
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    await workbook.xlsx.load(bytes.buffer.slice(0));
+  } else {
+    const defaultBuffer = await createDefaultMasterWorkbook(template);
+    await workbook.xlsx.load(defaultBuffer);
+  }
+
+  const targetSheetName = template.tableMapping?.targetSheetName;
+  const worksheet = targetSheetName 
+    ? (workbook.getWorksheet(targetSheetName) || workbook.worksheets[0]) 
+    : workbook.worksheets[0];
+
+  if (!worksheet) {
+    throw new Error('ワークシートが見つかりません。');
+  }
+
+  // 1. Inject Fields
+  const fields = template.fields || [];
+  for (const field of fields) {
+    if (!field.cell) continue;
+    const cell = worksheet.getCell(field.cell.trim().toUpperCase());
+    const rawVal = formValues[field.id];
+    if (field.type === 'checkbox') {
+      const isChecked = Boolean(rawVal);
+      cell.value = isChecked 
+        ? (field.checkboxConfig?.checkedValue || '☑ 要') 
+        : (field.checkboxConfig?.uncheckedValue || '☐ 不要');
+    } else if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
+      cell.value = String(rawVal);
+    } else if (field.defaultValue !== undefined && field.defaultValue !== '') {
+      cell.value = String(field.defaultValue);
+    }
+  }
+
+  // 2. Inject Legacy Mappings
+  if (template.cellMappings) {
+    for (const cm of template.cellMappings) {
+      if (!cm.cell || !cm.fieldKey) continue;
+      const cell = worksheet.getCell(cm.cell.trim().toUpperCase());
+      const val = docInfo[cm.fieldKey];
+      if (val !== undefined && val !== null) {
+        cell.value = val;
+      }
+    }
+  }
+
+  // 3. Inject Equipment Table
+  if (template.tableMapping) {
+    const tMap = template.tableMapping;
+    const startRow = tMap.startRow || 15;
+    items.forEach((item, index) => {
+      const rowNum = startRow + index;
+      const specSummary = item.specs && item.specs.length > 0
+        ? item.specs.map(s => `${s.name}: ${s.value}${s.unit ? ' ' + s.unit : ''}`).join(', ')
+        : (item.diameter && item.diameter !== '-' ? `口径: ${item.diameter}` : '-');
+
+      if (tMap.tagNoCol) worksheet.getCell(`${tMap.tagNoCol.toUpperCase()}${rowNum}`).value = item.tagNo || '-';
+      if (tMap.nameCol) worksheet.getCell(`${tMap.nameCol.toUpperCase()}${rowNum}`).value = item.name;
+      if (tMap.diameterCol) worksheet.getCell(`${tMap.diameterCol.toUpperCase()}${rowNum}`).value = specSummary;
+      if (tMap.materialCol) worksheet.getCell(`${tMap.materialCol.toUpperCase()}${rowNum}`).value = item.material || '-';
+      if (tMap.quantityCol) worksheet.getCell(`${tMap.quantityCol.toUpperCase()}${rowNum}`).value = `${item.quantity} ${item.unit || '台'}`;
+      if (tMap.deliveryDateCol) worksheet.getCell(`${tMap.deliveryDateCol.toUpperCase()}${rowNum}`).value = item.deliveryDate || '-';
+      if (tMap.notesCol) worksheet.getCell(`${tMap.notesCol.toUpperCase()}${rowNum}`).value = item.notes || '-';
+    });
+  }
+
+  // Build grid data for browser Excel viewer (Columns A to H)
+  const colLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+  const colWidths = [36, 110, 190, 120, 100, 75, 110, 190];
+  const columns = colLetters.map((c, i) => ({ colLetter: c, width: colWidths[i] }));
+
+  const rows: { rowNumber: number; cells: RenderedCellData[] }[] = [];
+  let cellCount = 0;
+
+  for (let r = 1; r <= maxRows; r++) {
+    const rowCells: RenderedCellData[] = [];
+    for (const c of colLetters) {
+      const addr = `${c}${r}`;
+      const cell = worksheet.getCell(addr);
+      cellCount++;
+
+      let displayVal = '';
+      if (cell.value !== null && cell.value !== undefined) {
+        if (typeof cell.value === 'object') {
+          if ('result' in cell.value && cell.value.result !== undefined) {
+            displayVal = String(cell.value.result);
+          } else if ('text' in cell.value && cell.value.text !== undefined) {
+            displayVal = String(cell.value.text);
+          } else if ('richText' in cell.value && Array.isArray((cell.value as any).richText)) {
+            displayVal = (cell.value as any).richText.map((t: any) => t.text).join('');
+          } else {
+            displayVal = String(cell.value);
+          }
+        } else {
+          displayVal = String(cell.value);
+        }
+      }
+
+      // Extract colors
+      let bgColor: string | undefined;
+      const fill = cell.fill as any;
+      if (fill && fill.fgColor && fill.fgColor.argb) {
+        const argb = String(fill.fgColor.argb);
+        if (argb.length === 8) {
+          bgColor = `#${argb.slice(2)}`;
+        }
+      }
+
+      const isBold = Boolean(cell.font && cell.font.bold);
+      const fontSize = cell.font && cell.font.size ? cell.font.size : 10;
+      const align = (cell.alignment && cell.alignment.horizontal as any) || (typeof cell.value === 'number' ? 'right' : 'left');
+      const hasBorder = Boolean(cell.border && (cell.border.top || cell.border.bottom || cell.border.left || cell.border.right));
+
+      rowCells.push({
+        address: addr,
+        col: c,
+        row: r,
+        value: displayVal,
+        isBold,
+        fontSize,
+        align,
+        bgColor,
+        hasBorder
+      });
+    }
+    rows.push({ rowNumber: r, cells: rowCells });
+  }
+
+  const benchmarkMs = Math.round((performance.now() - startTime) * 10) / 10;
+
+  return {
+    sheetName: worksheet.name,
+    columns,
+    rows,
+    totalCells: cellCount,
+    benchmarkMs
   };
 }

@@ -55,6 +55,15 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
         group: 'basic',
         defaultValue: '水道事業部 工事設計課'
       },
+      {
+        id: 'f-client-no',
+        label: '客先番号',
+        cell: 'C6',
+        type: 'text',
+        group: 'basic',
+        defaultValue: '【MC】-【09821】',
+        description: '客先管理コード（案件サマリーと一律連動）'
+      },
       // Checkboxes (適用要件)
       {
         id: 'f-chk-pressure',
@@ -221,6 +230,15 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
         group: 'basic',
         defaultValue: 'プラント施設課'
       },
+      {
+        id: 'f-client-no',
+        label: '客先番号',
+        cell: 'C6',
+        type: 'text',
+        group: 'basic',
+        defaultValue: '【MC】-【09821】',
+        description: '客先管理コード（案件サマリーと一律連動）'
+      },
       // Checkboxes
       {
         id: 'f-chk-pressure',
@@ -380,6 +398,15 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
         type: 'text',
         group: 'basic',
         defaultValue: '技術統括部 機械設備設計課'
+      },
+      {
+        id: 'f-client-no',
+        label: '客先番号',
+        cell: 'C6',
+        type: 'text',
+        group: 'basic',
+        defaultValue: '【MC】-【09821】',
+        description: '客先管理コード（案件サマリーと一律連動）'
       },
       // Checkboxes
       {

@@ -6,6 +6,11 @@ export const INITIAL_PROJECTS: ProjectWorkspace[] = [
     name: '第1期 プラント配管・機械調達案件',
     code: 'PRJ-2026-01',
     clientName: '〇〇化学工業株式会社',
+    clientNumber: '【MC】-【09821】',
+    clientNumberPart1: 'MC',
+    clientNumberPart2: '09821',
+    location: '東部コンビナート 第1工場地区',
+    department: 'プラント施設技術部 機電課',
     description: '工場配管更新に伴うバルブ・配管機器およびポンプ設備の調達',
     createdAt: '2026-03-01'
   }

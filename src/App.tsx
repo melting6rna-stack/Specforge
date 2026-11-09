@@ -509,6 +509,12 @@ export default function App() {
     setTimeout(() => setSyncNotice(''), 6000);
   };
 
+  // Update project metadata
+  const handleUpdateProject = (updated: ProjectWorkspace) => {
+    setProjects(prev => prev.map(p => p.id === updated.id ? updated : p));
+    setHasUnsavedChanges(true);
+  };
+
   // Manual save to linked JSON file
   const handleManualSaveJson = async () => {
     if (!activeProjectId) return;
@@ -957,6 +963,7 @@ export default function App() {
             categories={projectCategories}
             templates={templates}
             activeProjectId={activeProjectId}
+            currentProject={currentProject}
             onOpenAdminMapping={() => setActiveTab('templates')}
           />
         )}
@@ -978,6 +985,7 @@ export default function App() {
             categories={projectCategories}
             onSelectProject={handleRequestProjectChange}
             onAddProjectWithFile={handleAddProjectWithFile}
+            onUpdateProject={handleUpdateProject}
             onRelinkProjectFile={handleRelinkProjectFile}
             onSyncProjectFile={(pid) => performSyncProject(pid, false)}
             onExportProjectBackup={handleExportProjectBackup}

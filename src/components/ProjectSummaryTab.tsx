@@ -17,7 +17,8 @@ import {
   Check, 
   FileSpreadsheet,
   Layers,
-  FileCheck
+  FileCheck,
+  Save
 } from 'lucide-react';
 import { ProjectWorkspace, EquipmentItem, Category } from '../types';
 import { readFromProjectHandle, normalizeJsonToDatabase } from '../utils/sharedSyncManager';
@@ -33,6 +34,7 @@ interface ProjectSummaryTabProps {
     initialItems?: EquipmentItem[], 
     handle?: FileSystemFileHandle
   ) => void;
+  onUpdateProject?: (updated: ProjectWorkspace) => void;
   onRelinkProjectFile: (projectId: string) => void;
   onSyncProjectFile: (projectId: string) => void;
   onExportProjectBackup: () => void;
@@ -41,6 +43,19 @@ interface ProjectSummaryTabProps {
   isSyncing: boolean;
 }
 
+const parseClientNumberParts = (val?: string, part1?: string, part2?: string) => {
+  if (part1 !== undefined && part1 !== null && part2 !== undefined && part2 !== null) {
+    return { p1: part1, p2: part2 };
+  }
+  if (!val) return { p1: '', p2: '' };
+  const m = val.match(/^【?(.*?)】?-【?(.*?)】?$/);
+  if (m) {
+    return { p1: m[1] || '', p2: m[2] || '' };
+  }
+  const parts = val.split('-');
+  return { p1: parts[0] || '', p2: parts[1] || '' };
+};
+
 export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
   projects,
   activeProjectId,
@@ -48,6 +63,7 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
   categories,
   onSelectProject,
   onAddProjectWithFile,
+  onUpdateProject,
   onRelinkProjectFile,
   onSyncProjectFile,
   onExportProjectBackup,
@@ -59,6 +75,8 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectCode, setNewProjectCode] = useState('');
   const [newClientName, setNewClientName] = useState('');
+  const [newClientNumberPart1, setNewClientNumberPart1] = useState('');
+  const [newClientNumberPart2, setNewClientNumberPart2] = useState('');
   const [newDesc, setNewDesc] = useState('');
 
   // Selected file handle during new project creation
@@ -71,9 +89,71 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
   const [creationError, setCreationError] = useState<string>('');
   const [isReadingFile, setIsReadingFile] = useState(false);
 
+  // Active project quick-edit state
+  const currentProject = projects.find(p => p.id === activeProjectId) || projects[0];
+  const [editingName, setEditingName] = useState(currentProject?.name || '');
+  const [editingCode, setEditingCode] = useState(currentProject?.code || '');
+  const [editingClient, setEditingClient] = useState(currentProject?.clientName || '');
+  
+  const initialClientParts = parseClientNumberParts(currentProject?.clientNumber, currentProject?.clientNumberPart1, currentProject?.clientNumberPart2);
+  const [editingClientNumberPart1, setEditingClientNumberPart1] = useState(initialClientParts.p1);
+  const [editingClientNumberPart2, setEditingClientNumberPart2] = useState(initialClientParts.p2);
+
+  const [editingLocation, setEditingLocation] = useState(currentProject?.location || '');
+  const [editingDepartment, setEditingDepartment] = useState(currentProject?.department || '');
+  const [editingDesc, setEditingDesc] = useState(currentProject?.description || '');
+  const [isSavedNotice, setIsSavedNotice] = useState(false);
+
+  React.useEffect(() => {
+    if (currentProject) {
+      setEditingName(currentProject.name);
+      setEditingCode(currentProject.code);
+      setEditingClient(currentProject.clientName);
+      const parts = parseClientNumberParts(currentProject.clientNumber, currentProject.clientNumberPart1, currentProject.clientNumberPart2);
+      setEditingClientNumberPart1(parts.p1);
+      setEditingClientNumberPart2(parts.p2);
+      setEditingLocation(currentProject.location || '');
+      setEditingDepartment(currentProject.department || '');
+      setEditingDesc(currentProject.description || '');
+    }
+  }, [
+    currentProject?.id, 
+    currentProject?.name, 
+    currentProject?.code, 
+    currentProject?.clientName, 
+    currentProject?.clientNumber, 
+    currentProject?.clientNumberPart1, 
+    currentProject?.clientNumberPart2,
+    currentProject?.location,
+    currentProject?.department,
+    currentProject?.description
+  ]);
+
+  const handleSaveActiveProjectMeta = () => {
+    if (!currentProject || !onUpdateProject) return;
+    const p1 = editingClientNumberPart1.trim();
+    const p2 = editingClientNumberPart2.trim();
+    const compositeClientNum = (p1 || p2) ? `【${p1}】-【${p2}】` : '';
+
+    const updated: ProjectWorkspace = {
+      ...currentProject,
+      name: editingName.trim() || currentProject.name,
+      code: editingCode.trim() || currentProject.code,
+      clientName: editingClient.trim() || currentProject.clientName,
+      clientNumber: compositeClientNum,
+      clientNumberPart1: p1,
+      clientNumberPart2: p2,
+      location: editingLocation.trim(),
+      department: editingDepartment.trim(),
+      description: editingDesc.trim()
+    };
+    onUpdateProject(updated);
+    setIsSavedNotice(true);
+    setTimeout(() => setIsSavedNotice(false), 3000);
+  };
+
   const fallbackFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const currentProject = projects.find(p => p.id === activeProjectId) || projects[0];
   const projectItems = items.filter(i => i.projectId === activeProjectId);
 
   // Group by delivery date for schedule timeline
@@ -225,11 +305,18 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
     const projectId = `prj-${Date.now()}`;
     const code = newProjectCode.trim() || `PRJ-${new Date().getFullYear()}-${projects.length + 1}`;
 
+    const p1 = newClientNumberPart1.trim();
+    const p2 = newClientNumberPart2.trim();
+    const compositeClientNum = (p1 || p2) ? `【${p1}】-【${p2}】` : '';
+
     const newPrj: ProjectWorkspace = {
       id: projectId,
       name: newProjectName.trim(),
       code,
       clientName: newClientName.trim() || '特記仕様書調達案件',
+      clientNumber: compositeClientNum,
+      clientNumberPart1: p1,
+      clientNumberPart2: p2,
       description: newDesc.trim() || (selectedSchemaType === 'tokki-equipment' ? '特記仕様書スキーマ(v1.0)連動案件' : 'JSONデータベース紐づけ案件'),
       createdAt: new Date().toISOString().slice(0, 10),
       linkedJsonFileName: selectedFileName,
@@ -252,6 +339,8 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
     setNewProjectName('');
     setNewProjectCode('');
     setNewClientName('');
+    setNewClientNumberPart1('');
+    setNewClientNumberPart2('');
     setNewDesc('');
     setSelectedFileHandle(null);
     setSelectedFileName('');
@@ -472,6 +561,39 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
                   />
                 </div>
 
+                {/* 客先番号: 【】-【】 */}
+                <div className="sm:col-span-2">
+                  <label className="block font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                    <span>客先番号</span>
+                    <span className="text-[10px] text-slate-400 font-normal font-mono">【】-【】形式</span>
+                  </label>
+                  <div className="flex items-center gap-1">
+                    <div className="flex-1 flex items-center bg-white border border-slate-300 rounded px-2 py-1.5 focus-within:ring-1 focus-within:ring-slate-900 focus-within:border-slate-900 transition-all">
+                      <span className="text-slate-600 font-bold select-none text-xs font-sans mr-0.5">【</span>
+                      <input
+                        type="text"
+                        placeholder="客先記号 (例: MC)"
+                        value={newClientNumberPart1}
+                        onChange={(e) => setNewClientNumberPart1(e.target.value)}
+                        className="w-full text-xs font-mono font-bold text-center border-0 p-0 text-slate-900 focus:outline-hidden"
+                      />
+                      <span className="text-slate-600 font-bold select-none text-xs font-sans ml-0.5">】</span>
+                    </div>
+                    <span className="text-slate-400 font-bold select-none text-sm">-</span>
+                    <div className="flex-1 flex items-center bg-white border border-slate-300 rounded px-2 py-1.5 focus-within:ring-1 focus-within:ring-slate-900 focus-within:border-slate-900 transition-all">
+                      <span className="text-slate-600 font-bold select-none text-xs font-sans mr-0.5">【</span>
+                      <input
+                        type="text"
+                        placeholder="番号 (例: 09821)"
+                        value={newClientNumberPart2}
+                        onChange={(e) => setNewClientNumberPart2(e.target.value)}
+                        className="w-full text-xs font-mono font-bold text-center border-0 p-0 text-slate-900 focus:outline-hidden"
+                      />
+                      <span className="text-slate-600 font-bold select-none text-xs font-sans ml-0.5">】</span>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="sm:col-span-2">
                   <label className="block font-semibold text-slate-700 mb-1">案件概要・特記事項</label>
                   <input
@@ -616,6 +738,157 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
         </div>
       )}
 
+      {/* Project Common Information Editor (Uniformly applied to Specification Documents) */}
+      {currentProject && (
+        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xs font-bold text-slate-900">
+                  案件共通情報（仕様書に一律で自動反映）
+                </h2>
+                <span className="text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded font-mono font-medium">
+                  仕様書共通連携
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                ここで設定した案件名・工事コード・発注者・工事場所は、この案件のすべての仕様書に一律で自動転記されます。
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 self-end sm:self-auto">
+              {isSavedNotice && (
+                <span className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1 animate-in fade-in">
+                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>保存しました</span>
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={handleSaveActiveProjectMeta}
+                className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-md text-xs shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>案件情報を保存（仕様書に反映）</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 text-xs">
+            <div>
+              <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                案件名 / 工事名称 <span className="text-indigo-600">*</span>
+              </label>
+              <input
+                type="text"
+                value={editingName}
+                onChange={(e) => setEditingName(e.target.value)}
+                placeholder="例: 令和8年度 配水本管更新工事"
+                className="w-full text-xs bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5 font-bold text-slate-900 focus:bg-white focus:border-indigo-500 focus:outline-hidden"
+              />
+            </div>
+
+            <div>
+              <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                工事コード / 案件番号 <span className="text-indigo-600">*</span>
+              </label>
+              <input
+                type="text"
+                value={editingCode}
+                onChange={(e) => setEditingCode(e.target.value)}
+                placeholder="例: CW-2026-081"
+                className="w-full text-xs font-mono font-bold bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5 text-indigo-900 focus:bg-white focus:border-indigo-500 focus:outline-hidden"
+              />
+            </div>
+
+            {/* 客先番号: 【】-【】 */}
+            <div>
+              <label className="text-[11px] font-semibold text-slate-700 block mb-1 flex items-center justify-between">
+                <span>客先番号</span>
+                <span className="text-[10px] text-slate-400 font-mono">【】-【】</span>
+              </label>
+              <div className="flex items-center gap-1">
+                <div className="flex-1 flex items-center bg-slate-50 border border-slate-300 rounded px-1.5 py-1 focus-within:border-indigo-500 focus-within:bg-white focus-within:ring-1 focus-within:ring-indigo-500 transition-all">
+                  <span className="text-slate-600 font-bold select-none text-xs font-sans mr-0.5">【</span>
+                  <input
+                    type="text"
+                    value={editingClientNumberPart1}
+                    onChange={(e) => setEditingClientNumberPart1(e.target.value)}
+                    placeholder="記号"
+                    className="w-full text-xs font-mono font-bold text-center bg-transparent border-0 p-0 text-slate-900 focus:outline-hidden"
+                  />
+                  <span className="text-slate-600 font-bold select-none text-xs font-sans ml-0.5">】</span>
+                </div>
+                <span className="text-slate-400 font-bold select-none text-sm">-</span>
+                <div className="flex-1 flex items-center bg-slate-50 border border-slate-300 rounded px-1.5 py-1 focus-within:border-indigo-500 focus-within:bg-white focus-within:ring-1 focus-within:ring-indigo-500 transition-all">
+                  <span className="text-slate-600 font-bold select-none text-xs font-sans mr-0.5">【</span>
+                  <input
+                    type="text"
+                    value={editingClientNumberPart2}
+                    onChange={(e) => setEditingClientNumberPart2(e.target.value)}
+                    placeholder="番号"
+                    className="w-full text-xs font-mono font-bold text-center bg-transparent border-0 p-0 text-slate-900 focus:outline-hidden"
+                  />
+                  <span className="text-slate-600 font-bold select-none text-xs font-sans ml-0.5">】</span>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                発注者 / クライアント名
+              </label>
+              <input
+                type="text"
+                value={editingClient}
+                onChange={(e) => setEditingClient(e.target.value)}
+                placeholder="例: 〇〇市水道局 / 発注元企業"
+                className="w-full text-xs bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5 text-slate-800 focus:bg-white focus:border-indigo-500 focus:outline-hidden"
+              />
+            </div>
+
+            <div>
+              <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                工事場所 / 納入設置場所
+              </label>
+              <input
+                type="text"
+                value={editingLocation}
+                onChange={(e) => setEditingLocation(e.target.value)}
+                placeholder="例: 〇〇市〇〇町1丁目地内"
+                className="w-full text-xs bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5 text-slate-800 focus:bg-white focus:border-indigo-500 focus:outline-hidden"
+              />
+            </div>
+
+            <div>
+              <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                担当部署 / 仕様書発行元
+              </label>
+              <input
+                type="text"
+                value={editingDepartment}
+                onChange={(e) => setEditingDepartment(e.target.value)}
+                placeholder="例: 技術統括部 設計課"
+                className="w-full text-xs bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5 text-slate-800 focus:bg-white focus:border-indigo-500 focus:outline-hidden"
+              />
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                案件概要・備考
+              </label>
+              <input
+                type="text"
+                value={editingDesc}
+                onChange={(e) => setEditingDesc(e.target.value)}
+                placeholder="例: 第1工区 バルブおよび配管機器調達"
+                className="w-full text-xs bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5 text-slate-800 focus:bg-white focus:border-indigo-500 focus:outline-hidden"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* KPI Overview Strip */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs">
@@ -668,11 +941,20 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
-                    isCurrent ? 'bg-slate-800 text-indigo-300' : 'bg-slate-100 text-slate-700'
-                  }`}>
-                    {p.code}
-                  </span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                      isCurrent ? 'bg-slate-800 text-indigo-300' : 'bg-slate-100 text-slate-700'
+                    }`}>
+                      {p.code}
+                    </span>
+                    {(p.clientNumber || p.clientNumberPart1 || p.clientNumberPart2) && (
+                      <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-semibold ${
+                        isCurrent ? 'bg-indigo-950 text-indigo-200 border border-indigo-800' : 'bg-slate-100 text-slate-600 border border-slate-200'
+                      }`}>
+                        客先: {p.clientNumber || `【${p.clientNumberPart1 || ''}】-【${p.clientNumberPart2 || ''}】`}
+                      </span>
+                    )}
+                  </div>
                   <span className={`text-[11px] font-mono tabular-nums ${isCurrent ? 'text-slate-300' : 'text-slate-400'}`}>
                     機器数: {pCount} 点
                   </span>

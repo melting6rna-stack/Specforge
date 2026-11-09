@@ -151,9 +151,14 @@ export interface SpecMappingAssetFile {
 
 export interface ProjectWorkspace {
   id: string;
-  name: string;
-  code: string;
-  clientName: string;
+  name: string; // 案件名・工事名称 (共通入力)
+  code: string; // 工事コード (共通入力)
+  clientName: string; // 発注者・顧客名
+  clientNumber?: string; // 客先番号 (例: 【ABC】-【12345】)
+  clientNumberPart1?: string; // 客先番号 前半 (記号)
+  clientNumberPart2?: string; // 客先番号 後半 (番号)
+  location?: string; // 工事場所・設置場所
+  department?: string; // 担当部署・発行元
   description: string;
   createdAt: string;
   linkedJsonFileName?: string; // 紐づけられているJSONファイル名 (例: "PlantSpec_2026.json")
