@@ -482,8 +482,13 @@ export interface RenderedCellData {
   fontSize?: number;
   fontColor?: string;
   align?: 'left' | 'center' | 'right';
+  verticalAlign?: 'top' | 'middle' | 'bottom';
   bgColor?: string;
   hasBorder?: boolean;
+  borderTop?: boolean;
+  borderBottom?: boolean;
+  borderLeft?: boolean;
+  borderRight?: boolean;
   isMergedChild?: boolean;
   colSpan?: number;
   rowSpan?: number;
@@ -852,7 +857,14 @@ export async function renderSpecificationExcelGrid(
       const isBold = Boolean(cell.font && cell.font.bold);
       const fontSize = cell.font && cell.font.size ? cell.font.size : 10;
       const align = (cell.alignment && cell.alignment.horizontal as any) || (typeof cell.value === 'number' ? 'right' : 'left');
-      const hasBorder = Boolean(cell.border && (cell.border.top || cell.border.bottom || cell.border.left || cell.border.right));
+      const verticalAlign = (cell.alignment && cell.alignment.vertical as any) || 'middle';
+      
+      const border = cell.border;
+      const borderTop = Boolean(border?.top && (border.top.style || typeof border.top === 'string'));
+      const borderBottom = Boolean(border?.bottom && (border.bottom.style || typeof border.bottom === 'string'));
+      const borderLeft = Boolean(border?.left && (border.left.style || typeof border.left === 'string'));
+      const borderRight = Boolean(border?.right && (border.right.style || typeof border.right === 'string'));
+      const hasBorder = Boolean(borderTop || borderBottom || borderLeft || borderRight);
 
       // Field mapping tag
       const mapped = fieldMappingMap[addr];
@@ -866,8 +878,13 @@ export async function renderSpecificationExcelGrid(
         fontSize,
         fontColor,
         align,
+        verticalAlign,
         bgColor,
         hasBorder,
+        borderTop,
+        borderBottom,
+        borderLeft,
+        borderRight,
         isMergedChild,
         colSpan,
         rowSpan,

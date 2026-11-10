@@ -298,6 +298,12 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
     return selectedCell?.value ?? '';
   }, [selectedCellMappedField, formValues, selectedCell]);
 
+  // Total column width for proportional PDF table layout
+  const totalColWidth = useMemo(() => {
+    if (!excelGridData?.columns || excelGridData.columns.length === 0) return 1;
+    return excelGridData.columns.reduce((sum, c) => sum + c.width, 0);
+  }, [excelGridData]);
+
   // Handle cell edit via formula bar
   const handleFormulaChange = (newVal: string) => {
     if (selectedCellMappedField) {
@@ -1155,7 +1161,7 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
           {previewMode === 'pdf' && (
             <div className="space-y-2">
               <div className="bg-slate-100 border border-slate-300 rounded-xl p-4 sm:p-6 overflow-x-auto flex justify-center shadow-inner">
-                {/* Authentic A4 Specification Document Container */}
+                {/* Authentic A4 Specification Document Container: Converted from Loaded Excel Template */}
                 <div
                   ref={specSheetRef}
                   style={{
@@ -1166,177 +1172,90 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                     backgroundColor: '#ffffff',
                     color: '#0f172a',
                     boxSizing: 'border-box',
-                    padding: '40px 44px',
+                    padding: '36px 36px',
                     fontFamily: '"Hiragino Sans", "Meiryo", "BIZ UDPGothic", "Yu Gothic", sans-serif',
                   }}
-                  className="shadow-xl rounded-sm border border-slate-300 transition-transform text-slate-900"
+                  className="shadow-xl rounded-sm border border-slate-300 transition-transform text-slate-900 bg-white"
                 >
-                  {/* Document Header */}
-                  <div className="border-b-2 border-slate-900 pb-3 mb-4">
-                    <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono mb-1">
-                      <span>{activeTemplate?.code || 'SPEC-DOC'}</span>
-                      <span>{formValues['f-date'] || new Date().toISOString().slice(0, 10)} 発行</span>
+                  {/* Document Header Badge */}
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pb-1 border-b border-slate-200 mb-3">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-bold text-slate-700">【原本テンプレート直接描画帳票】</span>
+                      <span>{activeTemplate?.name || '調達仕様書'}</span>
+                      <span className="bg-slate-100 text-slate-600 px-1 py-0.2 rounded border border-slate-200 font-bold">{activeTemplate?.code || 'TPL'}</span>
                     </div>
-                    <h1 className="text-xl font-bold text-slate-900 text-center tracking-wider py-1.5 border-y border-slate-300 bg-slate-50">
-                      【 {formValues['f-title'] || activeTemplate?.name || '機器調達仕様書'} 】
-                    </h1>
-                  </div>
-
-                  {/* Basic Metadata Grid */}
-                  <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs border border-slate-300 p-3 mb-4 bg-slate-50/70 rounded">
-                    <div className="flex items-center">
-                      <span className="w-24 text-slate-500 font-semibold shrink-0">仕様書番号:</span>
-                      <span className="font-mono font-bold text-slate-900">{formValues['f-docno'] || fixedDocNo}</span>
-                    </div>
-                    <div className="flex items-center">
-                      <span className="w-24 text-slate-500 font-semibold shrink-0">発行日:</span>
-                      <span className="font-mono text-slate-800">{formValues['f-date'] || new Date().toISOString().slice(0, 10)}</span>
-                    </div>
-                    <div className="flex items-center">
-                      <span className="w-24 text-slate-500 font-semibold shrink-0">工事・件名:</span>
-                      <span className="font-bold text-slate-900 truncate">{formValues['f-project-name'] || currentProject?.name || '-'}</span>
-                    </div>
-                    <div className="flex items-center">
-                      <span className="w-24 text-slate-500 font-semibold shrink-0">発行元:</span>
-                      <span className="text-slate-800">{formValues['f-issuer'] || currentProject?.department || '設計部'}</span>
-                    </div>
-                    <div className="flex items-center">
-                      <span className="w-24 text-slate-500 font-semibold shrink-0">客先名 / 発注元:</span>
-                      <span className="font-medium text-slate-900 truncate">{formValues['f-client-name'] || currentProject?.clientName || '-'}</span>
-                    </div>
-                    <div className="flex items-center">
-                      <span className="w-24 text-slate-500 font-semibold shrink-0">工事場所:</span>
-                      <span className="text-slate-800 truncate">{currentProject?.location || '-'}</span>
-                    </div>
-                    {currentProject?.orderNo && (
-                      <div className="flex items-center">
-                        <span className="w-24 text-slate-500 font-semibold shrink-0">オーダーNo.:</span>
-                        <span className="font-mono font-bold text-indigo-900">{currentProject.orderNo}</span>
-                      </div>
-                    )}
-                    {(currentProject?.clientNumber || currentProject?.clientNumberPart1) && (
-                      <div className="flex items-center">
-                        <span className="w-24 text-slate-500 font-semibold shrink-0">客先番号:</span>
-                        <span className="font-mono font-bold text-slate-800">
-                          {currentProject.clientNumber || `【${currentProject.clientNumberPart1 || ''}】-【${currentProject.clientNumberPart2 || ''}】`}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Section 1: Applied requirements & checkbox mappings */}
-                  <div className="mb-4">
-                    <div className="text-xs font-bold bg-slate-200/80 px-2.5 py-1 text-slate-800 border-l-4 border-slate-700 mb-2">
-                      1. 適用要件・指定基準 (チェック項目 ＆ 仕様条件)
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 text-xs border border-slate-300 p-2.5 rounded bg-white">
-                      {checkFields.map(cf => {
-                        const isChecked = Boolean(formValues[cf.id]);
-                        const cfg = cf.checkboxConfig;
-                        return (
-                          <div key={cf.id} className="flex items-center justify-between p-1 border-b border-slate-100">
-                            <span className="text-slate-700 font-medium">{cf.label}:</span>
-                            <span className="font-bold font-mono">
-                              {isChecked 
-                                ? (cfg?.checkedValue || `☑ ${cfg?.labelTrue || '要'}`) 
-                                : (cfg?.uncheckedValue || `☐ ${cfg?.labelFalse || '不要'}`)}
-                            </span>
-                          </div>
-                        );
-                      })}
-                      {specFields.map(sf => (
-                        <div key={sf.id} className="flex items-center justify-between p-1 border-b border-slate-100">
-                          <span className="text-slate-700 font-medium">{sf.label}:</span>
-                          <span className="font-semibold text-slate-900">{formValues[sf.id] || sf.defaultValue || '-'}</span>
-                        </div>
-                      ))}
+                    <div className="flex items-center gap-2">
+                      <span>シート: <strong className="text-slate-600">{selectedSheetOverride || excelGridData?.sheetName || '仕様書'}</strong></span>
+                      <span>|</span>
+                      <span>仕様書番号: <strong className="text-indigo-900">{formValues['f-docno'] || fixedDocNo}</strong></span>
                     </div>
                   </div>
 
-                  {/* Section 2: Equipment details table */}
-                  <div className="mb-4">
-                    <div className="text-xs font-bold bg-slate-200/80 px-2.5 py-1 text-slate-800 border-l-4 border-slate-700 mb-2">
-                      2. 対象機器・調達品目明細 ({activeItems.length}件)
-                    </div>
-                    <table className="w-full text-left text-xs border-collapse border border-slate-400">
-                      <thead>
-                        <tr className="bg-slate-100 font-semibold text-slate-800 border-b border-slate-400">
-                          <th className="p-1.5 border-r border-slate-300 w-16 text-center">種別</th>
-                          <th className="p-1.5 border-r border-slate-300 w-24">機器番号</th>
-                          <th className="p-1.5 border-r border-slate-300">機器名称</th>
-                          <th className="p-1.5 border-r border-slate-300">仕様・口径</th>
-                          <th className="p-1.5 border-r border-slate-300 w-20">材質</th>
-                          <th className="p-1.5 border-r border-slate-300 w-16 text-center">数量</th>
-                          <th className="p-1.5 w-24">納期</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {activeItems.map((item, idx) => {
-                          const specSummary = item.specs && item.specs.length > 0 
-                            ? item.specs.map(s => `${s.name}:${s.value}`).join(' / ')
-                            : (item.diameter || '-');
-                          return (
-                            <tr key={item.id || idx} className="border-b border-slate-300 hover:bg-slate-50">
-                              <td className="p-1.5 border-r border-slate-300 text-center font-mono font-bold text-indigo-700 bg-indigo-50/50">
-                                {item.equipmentType || 'VA'}
-                              </td>
-                              <td className="p-1.5 border-r border-slate-300 font-mono font-bold text-slate-900">
-                                {item.tagNo || '-'}
-                              </td>
-                              <td className="p-1.5 border-r border-slate-300 font-semibold text-slate-800">
-                                {item.name}
-                              </td>
-                              <td className="p-1.5 border-r border-slate-300 text-[11px] text-slate-700">
-                                {specSummary}
-                              </td>
-                              <td className="p-1.5 border-r border-slate-300 font-mono text-slate-700">
-                                {item.material || '-'}
-                              </td>
-                              <td className="p-1.5 border-r border-slate-300 text-center font-mono">
-                                {item.quantity} {item.unit || '台'}
-                              </td>
-                              <td className="p-1.5 text-[11px] font-mono text-slate-700">
-                                {item.deliveryDate || '-'}
-                              </td>
+                  {/* Template Table Rendered Directly from ExcelJS In-Memory Grid */}
+                  {excelGridData && excelGridData.rows.length > 0 ? (
+                    <div className="w-full">
+                      <table className="w-full border-collapse table-fixed text-slate-900" style={{ fontSize: '10px' }}>
+                        <colgroup>
+                          {excelGridData.columns.map(col => (
+                            <col 
+                              key={col.colLetter} 
+                              style={{ width: `${(col.width / totalColWidth) * 100}%` }} 
+                            />
+                          ))}
+                        </colgroup>
+                        <tbody>
+                          {excelGridData.rows.map(row => (
+                            <tr 
+                              key={row.rowNumber} 
+                              style={{ height: row.height ? `${Math.round(row.height * 0.96)}px` : undefined }}
+                            >
+                              {row.cells.map(cell => {
+                                if (cell.isMergedChild) return null;
+
+                                return (
+                                  <td
+                                    key={cell.address}
+                                    colSpan={cell.colSpan || 1}
+                                    rowSpan={cell.rowSpan || 1}
+                                    style={{
+                                      backgroundColor: cell.bgColor || undefined,
+                                      color: cell.fontColor || '#0f172a',
+                                      textAlign: cell.align || 'left',
+                                      verticalAlign: cell.verticalAlign || 'middle',
+                                      fontWeight: cell.isBold ? 700 : 400,
+                                      fontSize: cell.fontSize ? `${Math.max(8.5, Math.min(cell.fontSize, 15))}px` : '9.5px',
+                                      borderTop: cell.borderTop ? '1px solid #475569' : undefined,
+                                      borderBottom: cell.borderBottom ? '1px solid #475569' : undefined,
+                                      borderLeft: cell.borderLeft ? '1px solid #475569' : undefined,
+                                      borderRight: cell.borderRight ? '1px solid #475569' : undefined,
+                                      border: (cell.hasBorder && !cell.borderTop && !cell.borderBottom && !cell.borderLeft && !cell.borderRight) ? '1px solid #475569' : undefined,
+                                      padding: '3px 5px',
+                                      wordBreak: 'break-word',
+                                      lineHeight: 1.25,
+                                      whiteSpace: 'pre-wrap',
+                                    }}
+                                  >
+                                    {cell.value || ''}
+                                  </td>
+                                );
+                              })}
                             </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="h-96 flex flex-col items-center justify-center text-slate-400 space-y-2">
+                      <RefreshCw className="w-8 h-8 animate-spin text-indigo-600" />
+                      <p className="text-xs font-semibold text-slate-600">テンプレート原本を解析・変換中...</p>
+                      <p className="text-[11px] text-slate-400">マッピング定義に基づきExcelシートをPDF帳票へレンダリングしています</p>
+                    </div>
+                  )}
 
-                  {/* Section 3: Notes / Technical Instructions */}
-                  <div className="mb-4">
-                    <div className="text-xs font-bold bg-slate-200/80 px-2.5 py-1 text-slate-800 border-l-4 border-slate-700 mb-1.5">
-                      3. 特記事項・技術指示事項
-                    </div>
-                    <div className="border border-slate-300 rounded p-3 text-xs text-slate-800 bg-white leading-relaxed min-h-[64px] whitespace-pre-wrap">
-                      {formValues['f-notes'] || activeTemplate?.notesTemplate || '指定の検査成績書およびミルシートは納品書に同封の上、1部提出すること。製品銘板には必ず機器番号（Tag No.）を打刻すること。'}
-                    </div>
-                  </div>
-
-                  {/* Footer with Seal boxes */}
-                  <div className="flex items-end justify-between pt-4 border-t border-slate-200 mt-6 text-xs text-slate-500">
-                    <div className="text-[11px]">
-                      <div>※ 本書はSpecForgeシステムにより電子生成された正式調達仕様書です。</div>
-                      <div className="font-mono text-[10px]">DocID: {fixedDocNo} | Generated: {new Date().toISOString()}</div>
-                    </div>
-                    <table className="border-collapse border border-slate-400 text-center text-[10px] w-48">
-                      <thead>
-                        <tr className="bg-slate-100 border-b border-slate-400">
-                          <th className="p-1 border-r border-slate-300 font-normal">承認</th>
-                          <th className="p-1 border-r border-slate-300 font-normal">審査</th>
-                          <th className="p-1 font-normal">担当</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr className="h-10">
-                          <td className="border-r border-slate-300"></td>
-                          <td className="border-r border-slate-300"></td>
-                          <td className="font-sans text-slate-700 pt-3">印</td>
-                        </tr>
-                      </tbody>
-                    </table>
+                  {/* Document Print Footer */}
+                  <div className="mt-4 pt-2 border-t border-slate-200 flex items-center justify-between text-[9px] text-slate-400 font-mono">
+                    <span>※ 本書は登録テンプレート原本（.xlsx）より変換・自動生成された正式調達仕様書です。</span>
+                    <span>DocID: {formValues['f-docno'] || fixedDocNo} | 発行日: {formValues['f-date'] || new Date().toISOString().slice(0, 10)}</span>
                   </div>
                 </div>
               </div>
