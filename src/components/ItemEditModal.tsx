@@ -44,6 +44,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
   if (!isOpen) return null;
 
   const [tagNo, setTagNo] = useState(item.tagNo || '');
+  const [equipmentType, setEquipmentType] = useState(item.equipmentType || '');
   const [name, setName] = useState(item.name || '');
   const [categoryId, setCategoryId] = useState(item.categoryId || categories[0]?.id || 'cat-etc');
   const [quantity, setQuantity] = useState<number>(item.quantity || 1);
@@ -121,6 +122,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
     // Generate diff log automatically
     const diffList: string[] = [];
     if (tagNo.trim() !== (item.tagNo || '')) diffList.push(`機器番号: ${item.tagNo || '-'} → ${tagNo.trim()}`);
+    if (equipmentType.trim().toUpperCase() !== (item.equipmentType || '')) diffList.push(`機器種別: ${item.equipmentType || '-'} → ${equipmentType.trim().toUpperCase()}`);
     if (name.trim() !== item.name) diffList.push(`機器名: ${item.name} → ${name.trim()}`);
     if (Number(quantity) !== item.quantity || unit.trim() !== item.unit) diffList.push(`数量: ${item.quantity}${item.unit} → ${quantity}${unit}`);
     if (categoryId !== item.categoryId) {
@@ -155,6 +157,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
     const updatedItem: EquipmentItem = {
       ...item,
       tagNo: tagNo.trim(),
+      equipmentType: equipmentType.trim().toUpperCase() || undefined,
       name: name.trim(),
       quantity: Number(quantity) || 1,
       unit: unit.trim() || '台',
@@ -205,7 +208,22 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
             </div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                <span>機器種別 (2文字)</span>
+                <span className="text-[10px] text-slate-400">例: VA, PU</span>
+              </label>
+              <input
+                type="text"
+                maxLength={2}
+                placeholder="VA"
+                value={equipmentType}
+                onChange={(e) => setEquipmentType(e.target.value.toUpperCase().replace(/[^A-Z]/g, ''))}
+                className="w-full border border-slate-300 rounded px-3 py-2 font-mono font-bold uppercase text-xs focus:ring-1 focus:ring-slate-900 focus:outline-hidden"
+              />
+            </div>
+
             <div>
               <label className="block font-semibold text-slate-700 mb-1">
                 機器番号 (タグNo.)

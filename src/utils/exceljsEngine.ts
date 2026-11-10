@@ -249,6 +249,45 @@ export async function fillSpecificationExcel(
     } else if (field.defaultValue !== undefined && field.defaultValue !== '') {
       cell.value = String(field.defaultValue);
     }
+
+    // Helper to find spec value from an item by label
+    const getItemValByLabel = (it: EquipmentItem | undefined, label: string) => {
+      if (!it) return '';
+      const clean = label.toLowerCase();
+      if (clean.includes('機器番号') || clean.includes('tag')) return it.tagNo || '';
+      if (clean.includes('機器名') || clean.includes('名称')) return it.name || '';
+      if (clean.includes('数量')) return `${it.quantity} ${it.unit || '台'}`;
+      if (clean.includes('納期')) return it.deliveryDate || '';
+      if (clean.includes('口径') && it.diameter && it.diameter !== '-') return it.diameter;
+      if (clean.includes('材質') && it.material && it.material !== '-') return it.material;
+      if (it.specs && it.specs.length > 0) {
+        for (const sp of it.specs) {
+          if (clean.includes(sp.name.toLowerCase()) || sp.name.toLowerCase().includes(clean)) {
+            return `${sp.value}${sp.unit ? ' ' + sp.unit : ''}`;
+          }
+        }
+      }
+      return '';
+    };
+
+    // Slot 2 (2種類目)
+    if (field.cellSlot2) {
+      const addr2 = field.cellSlot2.trim().toUpperCase();
+      const val2 = formValues[`${field.id}__slot2`] || getItemValByLabel(items[1], field.label);
+      if (val2) worksheet.getCell(addr2).value = String(val2);
+    }
+    // Slot 3 (3種類目)
+    if (field.cellSlot3) {
+      const addr3 = field.cellSlot3.trim().toUpperCase();
+      const val3 = formValues[`${field.id}__slot3`] || getItemValByLabel(items[2], field.label);
+      if (val3) worksheet.getCell(addr3).value = String(val3);
+    }
+    // Slot 4 (4種類目)
+    if (field.cellSlot4) {
+      const addr4 = field.cellSlot4.trim().toUpperCase();
+      const val4 = formValues[`${field.id}__slot4`] || getItemValByLabel(items[3], field.label);
+      if (val4) worksheet.getCell(addr4).value = String(val4);
+    }
   }
 
   // 2. INJECT LEGACY / BASELINE DOCUMENT CELL MAPPINGS (e.g. E30: notes, C3: title, etc.)
@@ -566,6 +605,48 @@ export async function renderSpecificationExcelGrid(
       cell.value = String(rawVal);
     } else if (field.defaultValue !== undefined && field.defaultValue !== '') {
       cell.value = String(field.defaultValue);
+    }
+
+    // Helper to find spec value from an item by label
+    const getItemVal = (it: EquipmentItem | undefined, label: string) => {
+      if (!it) return '';
+      const clean = label.toLowerCase();
+      if (clean.includes('機器番号') || clean.includes('tag')) return it.tagNo || '';
+      if (clean.includes('機器名') || clean.includes('名称')) return it.name || '';
+      if (clean.includes('数量')) return `${it.quantity} ${it.unit || '台'}`;
+      if (clean.includes('納期')) return it.deliveryDate || '';
+      if (clean.includes('口径') && it.diameter && it.diameter !== '-') return it.diameter;
+      if (clean.includes('材質') && it.material && it.material !== '-') return it.material;
+      if (it.specs && it.specs.length > 0) {
+        for (const sp of it.specs) {
+          if (clean.includes(sp.name.toLowerCase()) || sp.name.toLowerCase().includes(clean)) {
+            return `${sp.value}${sp.unit ? ' ' + sp.unit : ''}`;
+          }
+        }
+      }
+      return '';
+    };
+
+    // Slot 2 (2種類目)
+    if (field.cellSlot2) {
+      const addr2 = field.cellSlot2.trim().toUpperCase();
+      fieldMappingMap[addr2] = { id: `${field.id}__slot2`, label: `${field.label} (2種類目)` };
+      const val2 = formValues[`${field.id}__slot2`] || getItemVal(items[1], field.label);
+      if (val2) worksheet.getCell(addr2).value = String(val2);
+    }
+    // Slot 3 (3種類目)
+    if (field.cellSlot3) {
+      const addr3 = field.cellSlot3.trim().toUpperCase();
+      fieldMappingMap[addr3] = { id: `${field.id}__slot3`, label: `${field.label} (3種類目)` };
+      const val3 = formValues[`${field.id}__slot3`] || getItemVal(items[2], field.label);
+      if (val3) worksheet.getCell(addr3).value = String(val3);
+    }
+    // Slot 4 (4種類目)
+    if (field.cellSlot4) {
+      const addr4 = field.cellSlot4.trim().toUpperCase();
+      fieldMappingMap[addr4] = { id: `${field.id}__slot4`, label: `${field.label} (4種類目)` };
+      const val4 = formValues[`${field.id}__slot4`] || getItemVal(items[3], field.label);
+      if (val4) worksheet.getCell(addr4).value = String(val4);
     }
   }
 

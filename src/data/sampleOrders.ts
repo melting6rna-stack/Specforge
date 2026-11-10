@@ -44,6 +44,7 @@ export const INITIAL_ITEMS: EquipmentItem[] = [
       { id: 'sp-1-3', name: '耐圧', value: '10', unit: 'K' },
       { id: 'sp-1-4', name: '電圧', value: '100', unit: 'V' }
     ],
+    equipmentType: 'VA',
     diameter: '50A',
     material: 'SCS13A',
     createdAt: '2026-03-01',
@@ -53,6 +54,7 @@ export const INITIAL_ITEMS: EquipmentItem[] = [
     id: 'eq-02',
     projectId: 'prj-main',
     tagNo: 'P-201',
+    equipmentType: 'PU',
     name: '高圧渦巻ポンプユニット',
     quantity: 2,
     unit: '基',

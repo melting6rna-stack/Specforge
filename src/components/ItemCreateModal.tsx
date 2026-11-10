@@ -50,6 +50,7 @@ export const ItemCreateModal: React.FC<ItemCreateModalProps> = ({
 
   // Basic Information
   const [tagNo, setTagNo] = useState(`EQ-${String(existingCount + 1).padStart(3, '0')}`);
+  const [equipmentType, setEquipmentType] = useState('VA');
   const [name, setName] = useState('');
   const [categoryId, setCategoryId] = useState(categories[0]?.id || 'cat-etc');
   const [quantity, setQuantity] = useState<number>(1);
@@ -122,6 +123,7 @@ export const ItemCreateModal: React.FC<ItemCreateModalProps> = ({
       id: `eq-${Date.now()}`,
       projectId,
       tagNo: tagNo.trim(),
+      equipmentType: equipmentType.trim().toUpperCase(),
       name: name.trim(),
       quantity: Number(quantity) || 1,
       unit: unit.trim() || '台',
@@ -190,14 +192,29 @@ export const ItemCreateModal: React.FC<ItemCreateModalProps> = ({
               <span className="text-[11px] text-slate-400">* は必須項目</span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>機器種別 (2文字)</span>
+                  <span className="text-[10px] text-slate-400">例: VA, PU</span>
+                </label>
+                <input
+                  type="text"
+                  maxLength={2}
+                  placeholder="VA"
+                  value={equipmentType}
+                  onChange={(e) => setEquipmentType(e.target.value.toUpperCase().replace(/[^A-Z]/g, ''))}
+                  className="w-full border border-slate-300 rounded-md px-3 py-2 font-mono font-bold uppercase text-xs focus:ring-1 focus:ring-slate-900 focus:outline-hidden"
+                />
+              </div>
+
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">
                   機器番号 (タグNo.)
                 </label>
                 <input
                   type="text"
-                  placeholder="例: EQ-001, P-101, V-201"
+                  placeholder="例: V-101, P-201"
                   value={tagNo}
                   onChange={(e) => setTagNo(e.target.value)}
                   className="w-full border border-slate-300 rounded-md px-3 py-2 font-mono text-xs focus:ring-1 focus:ring-slate-900 focus:outline-hidden"

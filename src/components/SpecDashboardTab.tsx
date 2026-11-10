@@ -14,7 +14,8 @@ import {
   FileSpreadsheet,
   FileCheck2,
   Eye,
-  Layers
+  Layers,
+  ChevronDown
 } from 'lucide-react';
 import { EquipmentItem, SpecTemplate, Category, SpecFieldMapping, ProjectWorkspace } from '../types';
 import { downloadSpecificationExcel, renderSpecificationExcelGrid, RenderedSheetGrid } from '../utils/exceljsEngine';
@@ -118,17 +119,19 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
   const [isGeneratingPdf, setIsGeneratingPdf] = useState<boolean>(false);
   const [previewMode, setPreviewMode] = useState<'pdf' | 'excel'>('pdf');
   const [pdfNotice, setPdfNotice] = useState<string>('');
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState<boolean>(false);
   const specSheetRef = useRef<HTMLDivElement | null>(null);
 
-  // Auto-calculated document number: semi-fixed based on project code and equipment tag
+  // Auto-calculated document number: 案件コードの後にハイフン入れず機器種別の2文字+G、ハイフン+機器番号
   const fixedDocNo = useMemo(() => {
-    const prjCode = currentProject?.code || 'PRJ';
-    const tag = primaryItem?.tagNo || 'EQ001';
-    return `${prjCode}-${tag}-SPEC`;
-  }, [currentProject?.code, primaryItem?.tagNo]);
+    const prjCode = currentProject?.code || 'PRJ-2026-01';
+    const typeCode = (primaryItem?.equipmentType || 'VA').trim().toUpperCase();
+    const tag = primaryItem?.tagNo || 'V-101';
+    return `${prjCode}${typeCode}G-${tag}`;
+  }, [currentProject?.code, primaryItem?.equipmentType, primaryItem?.tagNo]);
 
   // Helper to transfer equipment specs into mapped template fields
-  const transferSpecsFromEquipment = useCallback((item: EquipmentItem | undefined, tpl: SpecTemplate | undefined, currentVals: Record<string, any>) => {
+  const transferSpecsFromEquipment = useCallback((item: EquipmentItem | undefined, tpl: SpecTemplate | undefined, currentVals: Record<string, any>, itemsList?: EquipmentItem[]) => {
     if (!item || !tpl) return { newVals: currentVals, matchedMap: {} };
 
     const newVals = { ...currentVals };
@@ -168,8 +171,10 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
         }
       }
       if (f.id === 'f-docno' || labelClean.includes('仕様書番号')) {
-        newVals[f.id] = `${currentProject?.code || 'PRJ'}-${item.tagNo || 'EQ01'}-SPEC`;
-        matched[f.id] = `案件・機器連動: ${newVals[f.id]}`;
+        const prjCode = currentProject?.code || 'PRJ-2026-01';
+        const typeCode = (item.equipmentType || 'VA').trim().toUpperCase();
+        newVals[f.id] = `${prjCode}${typeCode}G-${item.tagNo || 'V-101'}`;
+        matched[f.id] = `案件・機器種別連動: ${newVals[f.id]}`;
         continue;
       }
       if (f.id === 'f-issuer' || labelClean.includes('発行元')) {
@@ -363,61 +368,39 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
     }
   };
 
-  // Convert A4 HTML specification sheet to high-res PDF Blob & Object URL
-  const generatePdfFromDom = useCallback(async () => {
-    if (!specSheetRef.current) return;
-    setIsGeneratingPdf(true);
-    try {
-      const res = await convertElementToPdfBlob(specSheetRef.current);
-      setPdfUrl(prev => {
-        if (prev) URL.revokeObjectURL(prev);
-        return res.url;
-      });
-    } catch (err: any) {
-      console.warn('PDF conversion error:', err);
-    } finally {
-      setIsGeneratingPdf(false);
-    }
-  }, []);
-
-  // Reload action: Re-transfers specs, updates ExcelJS grid, and re-generates PDF preview
+  // Reload action: Re-transfers specs, updates ExcelJS grid, and notifies user
   const handleReloadPreview = useCallback(() => {
     const { newVals, matchedMap } = transferSpecsFromEquipment(primaryItem, activeTemplate, formValues);
     setFormValues(newVals);
     setTransferredFieldsMap(matchedMap);
     setRenderCounter(c => c + 1);
-    setPdfNotice('再読み込み中... 最新データをPDFプレビューへ反映しています');
+    setPdfNotice('再読み込み完了: 入力情報とマッピングをプレビューに反映しました');
+    setTimeout(() => setPdfNotice(''), 3000);
+  }, [primaryItem, activeTemplate, formValues, transferSpecsFromEquipment]);
 
-    setTimeout(async () => {
-      await generatePdfFromDom();
-      setPdfNotice('再読み込み完了: 入力情報とマッピングがPDFプレビューに反映されました');
+  // Download PDF file directly by capturing visible A4 spec sheet
+  const handleDownloadPdf = async () => {
+    if (!specSheetRef.current) return;
+    setIsGeneratingPdf(true);
+    setPdfNotice('PDF出力ファイルを生成中...');
+    setIsExportMenuOpen(false);
+    try {
+      const res = await convertElementToPdfBlob(specSheetRef.current);
+      const a = document.createElement('a');
+      a.href = res.url;
+      a.download = `${activeTemplate?.name || '仕様書'}_${fixedDocNo || 'SPEC'}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setPdfNotice('PDF出力が完了しました');
       setTimeout(() => setPdfNotice(''), 3500);
-    }, 250);
-  }, [primaryItem, activeTemplate, formValues, transferSpecsFromEquipment, generatePdfFromDom]);
-
-  // Download PDF file
-  const handleDownloadPdf = () => {
-    if (!pdfUrl) {
-      handleReloadPreview();
-      return;
+    } catch (err: any) {
+      console.error('PDF generation error:', err);
+      alert(`PDF生成中にエラーが発生しました: ${err.message || 'ブラウザの描画設定をご確認ください'}`);
+    } finally {
+      setIsGeneratingPdf(false);
     }
-    const a = document.createElement('a');
-    a.href = pdfUrl;
-    a.download = `${activeTemplate?.name || '仕様書'}_${fixedDocNo || 'SPEC'}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
   };
-
-  // Auto-generate initial PDF preview once mounted and whenever template or primary equipment changes
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (specSheetRef.current) {
-        generatePdfFromDom();
-      }
-    }, 600);
-    return () => clearTimeout(timer);
-  }, [activeTemplate?.id, primaryItem?.id, generatePdfFromDom]);
 
   // Group fields for clean user form presentation
   const basicFields = useMemo(() => (activeTemplate?.fields || []).filter(f => f.group === 'basic'), [activeTemplate]);
@@ -663,28 +646,44 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                 </span>
               </div>
 
-              {/* List of included equipment items */}
-              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                {activeItems.map(it => {
+              {/* List of included equipment items (1種類目〜4種類目) */}
+              <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                {activeItems.map((it, idx) => {
                   const isPrimary = it.id === primaryItemId;
+                  const slotLabel = idx === 0 ? '1種類目 (主仕様)' : `${idx + 1}種類目`;
                   return (
                     <div
                       key={it.id}
-                      className={`flex items-center justify-between p-2 rounded-lg border text-xs transition-colors ${
-                        isPrimary ? 'bg-indigo-50/70 border-indigo-300' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                      className={`flex items-center justify-between p-2.5 rounded-lg border text-xs transition-colors ${
+                        isPrimary ? 'bg-indigo-50/80 border-indigo-300 shadow-2xs' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
                       }`}
                     >
                       <div className="flex items-center gap-2 truncate">
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
+                          idx === 0 
+                            ? 'bg-indigo-600 text-white' 
+                            : 'bg-slate-200 text-slate-700'
+                        }`}>
+                          {slotLabel}
+                        </span>
+
                         <button
                           type="button"
                           onClick={() => setPrimaryItemId(it.id)}
-                          className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 cursor-pointer ${
+                          className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 cursor-pointer ${
                             isPrimary ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 bg-white'
                           }`}
-                          title={isPrimary ? '主仕様（転記元）として選択中' : 'この機器を主仕様（転記元）に設定'}
+                          title={isPrimary ? '主仕様（転記元）として選択中' : 'この機器を主仕様（1種類目）に設定'}
                         >
                           {isPrimary && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
                         </button>
+
+                        {it.equipmentType && (
+                          <span className="font-mono text-[10px] bg-indigo-100 text-indigo-800 font-bold px-1 py-0.2 rounded shrink-0">
+                            {it.equipmentType.toUpperCase()}
+                          </span>
+                        )}
+
                         <span className="font-mono font-bold text-slate-800 shrink-0">
                           [{it.tagNo || '未割当'}]
                         </span>
@@ -694,11 +693,6 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                         <span className="text-[11px] text-slate-500 shrink-0 font-mono">
                           ({it.quantity} {it.unit || '台'})
                         </span>
-                        {isPrimary && (
-                          <span className="text-[9px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.2 rounded shrink-0">
-                            主仕様（編集中）
-                          </span>
-                        )}
                       </div>
 
                       {activeItems.length > 1 && (
@@ -957,9 +951,9 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
           )}
         </div>
 
-        {/* Right Column: PDF Preview (Default) & Real-Time Excel Spreadsheet View (7 cols) */}
+        {/* Right Column: PDF Specification Sheet & Excel Spreadsheet Live Views (7 cols) */}
         <div className="lg:col-span-7 space-y-3">
-          {/* Header Strip: Title, Reload, Mode Toggle, and Download Actions */}
+          {/* Header Strip: Title, Reload, Unified Export Dropdown, and Zoom Controls */}
           <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-2xs space-y-2.5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div className="flex items-center gap-2">
@@ -973,7 +967,7 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                 <div>
                   <div className="flex items-center gap-1.5">
                     <h2 className="text-xs font-bold text-slate-900">
-                      {previewMode === 'pdf' ? '仕様書プレビュー (PDF)' : 'Excel原本 直接描画ビュー'}
+                      仕様書プレビュー
                     </h2>
                     <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.2 rounded">
                       （編集中）
@@ -981,89 +975,152 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                   </div>
                   <p className="text-[11px] text-slate-500">
                     {previewMode === 'pdf' 
-                      ? '入力内容とマッピングをPDFへ変換してプレビュー表示しています' 
-                      : 'ExcelJSメモリ内スプレッドシート（セル直接クリック・数式バー編集対応）'}
+                      ? '入力内容とマッピングをリアルタイムに帳票へ反映しています' 
+                      : 'ExcelJSメモリ内原本スプレッドシート（セル直接クリック・数式バー編集対応）'}
                   </p>
                 </div>
               </div>
 
-              {/* Action Buttons: Reload, Mode switch, Downloads */}
+              {/* Action Buttons: Reload, Unified Export Dropdown, and Zoom */}
               <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
                 {/* Prominent Reload Preview Button */}
                 <button
                   type="button"
                   onClick={handleReloadPreview}
                   disabled={isGeneratingPdf}
-                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
-                  title="エクセル入力やマッピングの変更を再読み込みして最新PDFを反映"
+                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
+                  title="入力やマッピングの変更を再読み込みして最新プレビューを反映"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingPdf ? 'animate-spin' : ''}`} />
                   <span>再読み込み</span>
                 </button>
 
-                {/* View Mode Toggle: [ PDF ] / [ Excel ] */}
-                <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs shrink-0">
+                {/* Unified Output Button with Dropdown (PDF / Excel) */}
+                <div className="relative">
                   <button
                     type="button"
-                    onClick={() => setPreviewMode('pdf')}
-                    className={`px-2.5 py-1 rounded font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                      previewMode === 'pdf'
-                        ? 'bg-white text-rose-700 shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
+                    onClick={() => setIsExportMenuOpen(prev => !prev)}
+                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
+                    title="仕様書ファイルを出力 (PDFまたはExcel)"
                   >
-                    <FileText className="w-3 h-3" />
-                    <span>PDF</span>
+                    <Download className="w-3.5 h-3.5" />
+                    <span>出力</span>
+                    <ChevronDown className={`w-3 h-3 transition-transform ${isExportMenuOpen ? 'rotate-180' : ''}`} />
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setPreviewMode('excel')}
-                    className={`px-2.5 py-1 rounded font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                      previewMode === 'excel'
-                        ? 'bg-white text-emerald-700 shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <FileSpreadsheet className="w-3 h-3" />
-                    <span>Excel</span>
-                  </button>
+
+                  {isExportMenuOpen && (
+                    <>
+                      <div 
+                        className="fixed inset-0 z-40" 
+                        onClick={() => setIsExportMenuOpen(false)} 
+                      />
+                      <div className="absolute right-0 mt-1.5 w-56 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-50 animate-in fade-in zoom-in-95">
+                        <div className="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1">
+                          出力形式を選択
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleDownloadPdf}
+                          disabled={isGeneratingPdf}
+                          className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-rose-50 hover:text-rose-700 flex items-center gap-2.5 transition-colors cursor-pointer"
+                        >
+                          <div className="w-7 h-7 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                            <FileText className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <div className="font-bold flex items-center gap-1">
+                              <span>PDF出力</span>
+                              <span className="text-[10px] text-rose-600 font-mono">(.pdf)</span>
+                            </div>
+                            <div className="text-[10px] text-slate-400">提出・印刷用フォーマット</div>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleExportExcel}
+                          disabled={isExporting}
+                          className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center gap-2.5 transition-colors cursor-pointer"
+                        >
+                          <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                            <FileSpreadsheet className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <div className="font-bold flex items-center gap-1">
+                              <span>Excel出力</span>
+                              <span className="text-[10px] text-emerald-600 font-mono">(.xlsx)</span>
+                            </div>
+                            <div className="text-[10px] text-slate-400">原本マスター雛形に直接反映</div>
+                          </div>
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
 
-                {/* PDF Download Button */}
-                <button
-                  type="button"
-                  onClick={handleDownloadPdf}
-                  className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition-all shadow-2xs flex items-center gap-1 cursor-pointer shrink-0"
-                  title="仕様書をPDFファイルとしてダウンロード"
-                >
-                  <Download className="w-3.5 h-3.5 text-rose-600" />
-                  <span>PDF出力</span>
-                </button>
-
-                {/* Excel Download Button */}
-                <button
-                  type="button"
-                  onClick={handleExportExcel}
-                  disabled={isExporting}
-                  className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1 cursor-pointer disabled:opacity-50 shrink-0"
-                  title="マスター雛形Excelへ流し込んだxlsxファイルをダウンロード"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>{isExporting ? '出力中...' : 'Excel出力'}</span>
-                </button>
+                {/* Zoom Controls */}
+                <div className="flex items-center bg-slate-100 border border-slate-200 rounded-lg p-0.5 text-xs shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewZoom(z => Math.max(50, z - 10))}
+                    className="p-1 hover:bg-white rounded text-slate-600 hover:text-slate-900 cursor-pointer"
+                    title="縮小"
+                  >
+                    <ZoomOut className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="px-1.5 font-mono text-[11px] font-semibold text-slate-700 select-none">
+                    {previewZoom}%
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewZoom(z => Math.min(150, z + 10))}
+                    className="p-1 hover:bg-white rounded text-slate-600 hover:text-slate-900 cursor-pointer"
+                    title="拡大"
+                  >
+                    <ZoomIn className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             </div>
 
             {/* Notification Bar */}
-            {pdfNotice && (
+            {(pdfNotice || exportNotice) && (
               <div className="bg-indigo-50 border border-indigo-200 text-indigo-900 text-xs px-3 py-1.5 rounded-lg flex items-center justify-between animate-in fade-in">
                 <span className="flex items-center gap-1.5 font-medium">
-                  <CheckSquare className="w-3.5 h-3.5 text-indigo-600" />
-                  {pdfNotice}
+                  <CheckSquare className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  {pdfNotice || exportNotice}
                 </span>
-                <button onClick={() => setPdfNotice('')} className="text-indigo-400 hover:text-indigo-700">✕</button>
+                <button onClick={() => { setPdfNotice(''); setExportNotice(''); }} className="text-indigo-400 hover:text-indigo-700 cursor-pointer">✕</button>
               </div>
             )}
+
+            {/* PREVIEW MODE TABS (Clean tabs spanning across canvas) */}
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+              <button
+                type="button"
+                onClick={() => setPreviewMode('pdf')}
+                className={`flex-1 py-2 px-4 rounded-lg font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                  previewMode === 'pdf'
+                    ? 'bg-white text-rose-700 shadow-sm border border-slate-200'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                }`}
+              >
+                <FileText className="w-4 h-4 text-rose-600" />
+                <span>PDF (仕様書帳票)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewMode('excel')}
+                className={`flex-1 py-2 px-4 rounded-lg font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                  previewMode === 'excel'
+                    ? 'bg-white text-emerald-700 shadow-sm border border-slate-200'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                }`}
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                <span>EXCEL (原本直接描画)</span>
+              </button>
+            </div>
 
             {/* Excel Formula Bar: Shown when in Excel mode */}
             {previewMode === 'excel' && (
@@ -1094,53 +1151,205 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
             )}
           </div>
 
-          {/* VIEW MODE 1: PDF PREVIEW (PDFに変換して表示) */}
+          {/* VIEW MODE 1: PDF SPECIFICATION SHEET PREVIEW */}
           {previewMode === 'pdf' && (
             <div className="space-y-2">
-              <div className="bg-white border border-slate-300 shadow-sm rounded-xl overflow-hidden">
-                {isGeneratingPdf && !pdfUrl ? (
-                  <div className="h-[760px] flex flex-col items-center justify-center space-y-3 bg-slate-50">
-                    <RefreshCw className="w-8 h-8 text-indigo-600 animate-spin" />
-                    <p className="text-xs font-semibold text-slate-700">仕様書をPDFに変換中...</p>
-                    <p className="text-[11px] text-slate-400">マッピング定義と入力データを解析・描画しています</p>
+              <div className="bg-slate-100 border border-slate-300 rounded-xl p-4 sm:p-6 overflow-x-auto flex justify-center shadow-inner">
+                {/* Authentic A4 Specification Document Container */}
+                <div
+                  ref={specSheetRef}
+                  style={{
+                    width: '794px',
+                    minHeight: '1123px',
+                    transform: previewZoom !== 100 ? `scale(${previewZoom / 100})` : undefined,
+                    transformOrigin: 'top center',
+                    backgroundColor: '#ffffff',
+                    color: '#0f172a',
+                    boxSizing: 'border-box',
+                    padding: '40px 44px',
+                    fontFamily: '"Hiragino Sans", "Meiryo", "BIZ UDPGothic", "Yu Gothic", sans-serif',
+                  }}
+                  className="shadow-xl rounded-sm border border-slate-300 transition-transform text-slate-900"
+                >
+                  {/* Document Header */}
+                  <div className="border-b-2 border-slate-900 pb-3 mb-4">
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono mb-1">
+                      <span>{activeTemplate?.code || 'SPEC-DOC'}</span>
+                      <span>{formValues['f-date'] || new Date().toISOString().slice(0, 10)} 発行</span>
+                    </div>
+                    <h1 className="text-xl font-bold text-slate-900 text-center tracking-wider py-1.5 border-y border-slate-300 bg-slate-50">
+                      【 {formValues['f-title'] || activeTemplate?.name || '機器調達仕様書'} 】
+                    </h1>
                   </div>
-                ) : pdfUrl ? (
-                  <iframe
-                    src={`${pdfUrl}#toolbar=0&navpanes=0`}
-                    className="w-full h-[760px] border-none bg-slate-100"
-                    title="仕様書 PDF プレビュー"
-                  />
-                ) : (
-                  <div className="h-[760px] flex flex-col items-center justify-center space-y-3 bg-slate-50">
-                    <FileText className="w-10 h-10 text-slate-300" />
-                    <p className="text-xs font-semibold text-slate-600">PDFプレビューの準備ができていません</p>
-                    <button
-                      type="button"
-                      onClick={handleReloadPreview}
-                      className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 transition-colors shadow-xs"
-                    >
-                      PDFを生成する
-                    </button>
+
+                  {/* Basic Metadata Grid */}
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs border border-slate-300 p-3 mb-4 bg-slate-50/70 rounded">
+                    <div className="flex items-center">
+                      <span className="w-24 text-slate-500 font-semibold shrink-0">仕様書番号:</span>
+                      <span className="font-mono font-bold text-slate-900">{formValues['f-docno'] || fixedDocNo}</span>
+                    </div>
+                    <div className="flex items-center">
+                      <span className="w-24 text-slate-500 font-semibold shrink-0">発行日:</span>
+                      <span className="font-mono text-slate-800">{formValues['f-date'] || new Date().toISOString().slice(0, 10)}</span>
+                    </div>
+                    <div className="flex items-center">
+                      <span className="w-24 text-slate-500 font-semibold shrink-0">工事・件名:</span>
+                      <span className="font-bold text-slate-900 truncate">{formValues['f-project-name'] || currentProject?.name || '-'}</span>
+                    </div>
+                    <div className="flex items-center">
+                      <span className="w-24 text-slate-500 font-semibold shrink-0">発行元:</span>
+                      <span className="text-slate-800">{formValues['f-issuer'] || currentProject?.department || '設計部'}</span>
+                    </div>
+                    <div className="flex items-center">
+                      <span className="w-24 text-slate-500 font-semibold shrink-0">客先名 / 発注元:</span>
+                      <span className="font-medium text-slate-900 truncate">{formValues['f-client-name'] || currentProject?.clientName || '-'}</span>
+                    </div>
+                    <div className="flex items-center">
+                      <span className="w-24 text-slate-500 font-semibold shrink-0">工事場所:</span>
+                      <span className="text-slate-800 truncate">{currentProject?.location || '-'}</span>
+                    </div>
+                    {currentProject?.orderNo && (
+                      <div className="flex items-center">
+                        <span className="w-24 text-slate-500 font-semibold shrink-0">オーダーNo.:</span>
+                        <span className="font-mono font-bold text-indigo-900">{currentProject.orderNo}</span>
+                      </div>
+                    )}
+                    {(currentProject?.clientNumber || currentProject?.clientNumberPart1) && (
+                      <div className="flex items-center">
+                        <span className="w-24 text-slate-500 font-semibold shrink-0">客先番号:</span>
+                        <span className="font-mono font-bold text-slate-800">
+                          {currentProject.clientNumber || `【${currentProject.clientNumberPart1 || ''}】-【${currentProject.clientNumberPart2 || ''}】`}
+                        </span>
+                      </div>
+                    )}
                   </div>
-                )}
+
+                  {/* Section 1: Applied requirements & checkbox mappings */}
+                  <div className="mb-4">
+                    <div className="text-xs font-bold bg-slate-200/80 px-2.5 py-1 text-slate-800 border-l-4 border-slate-700 mb-2">
+                      1. 適用要件・指定基準 (チェック項目 ＆ 仕様条件)
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs border border-slate-300 p-2.5 rounded bg-white">
+                      {checkFields.map(cf => {
+                        const isChecked = Boolean(formValues[cf.id]);
+                        const cfg = cf.checkboxConfig;
+                        return (
+                          <div key={cf.id} className="flex items-center justify-between p-1 border-b border-slate-100">
+                            <span className="text-slate-700 font-medium">{cf.label}:</span>
+                            <span className="font-bold font-mono">
+                              {isChecked 
+                                ? (cfg?.checkedValue || `☑ ${cfg?.labelTrue || '要'}`) 
+                                : (cfg?.uncheckedValue || `☐ ${cfg?.labelFalse || '不要'}`)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                      {specFields.map(sf => (
+                        <div key={sf.id} className="flex items-center justify-between p-1 border-b border-slate-100">
+                          <span className="text-slate-700 font-medium">{sf.label}:</span>
+                          <span className="font-semibold text-slate-900">{formValues[sf.id] || sf.defaultValue || '-'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Section 2: Equipment details table */}
+                  <div className="mb-4">
+                    <div className="text-xs font-bold bg-slate-200/80 px-2.5 py-1 text-slate-800 border-l-4 border-slate-700 mb-2">
+                      2. 対象機器・調達品目明細 ({activeItems.length}件)
+                    </div>
+                    <table className="w-full text-left text-xs border-collapse border border-slate-400">
+                      <thead>
+                        <tr className="bg-slate-100 font-semibold text-slate-800 border-b border-slate-400">
+                          <th className="p-1.5 border-r border-slate-300 w-16 text-center">種別</th>
+                          <th className="p-1.5 border-r border-slate-300 w-24">機器番号</th>
+                          <th className="p-1.5 border-r border-slate-300">機器名称</th>
+                          <th className="p-1.5 border-r border-slate-300">仕様・口径</th>
+                          <th className="p-1.5 border-r border-slate-300 w-20">材質</th>
+                          <th className="p-1.5 border-r border-slate-300 w-16 text-center">数量</th>
+                          <th className="p-1.5 w-24">納期</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {activeItems.map((item, idx) => {
+                          const specSummary = item.specs && item.specs.length > 0 
+                            ? item.specs.map(s => `${s.name}:${s.value}`).join(' / ')
+                            : (item.diameter || '-');
+                          return (
+                            <tr key={item.id || idx} className="border-b border-slate-300 hover:bg-slate-50">
+                              <td className="p-1.5 border-r border-slate-300 text-center font-mono font-bold text-indigo-700 bg-indigo-50/50">
+                                {item.equipmentType || 'VA'}
+                              </td>
+                              <td className="p-1.5 border-r border-slate-300 font-mono font-bold text-slate-900">
+                                {item.tagNo || '-'}
+                              </td>
+                              <td className="p-1.5 border-r border-slate-300 font-semibold text-slate-800">
+                                {item.name}
+                              </td>
+                              <td className="p-1.5 border-r border-slate-300 text-[11px] text-slate-700">
+                                {specSummary}
+                              </td>
+                              <td className="p-1.5 border-r border-slate-300 font-mono text-slate-700">
+                                {item.material || '-'}
+                              </td>
+                              <td className="p-1.5 border-r border-slate-300 text-center font-mono">
+                                {item.quantity} {item.unit || '台'}
+                              </td>
+                              <td className="p-1.5 text-[11px] font-mono text-slate-700">
+                                {item.deliveryDate || '-'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Section 3: Notes / Technical Instructions */}
+                  <div className="mb-4">
+                    <div className="text-xs font-bold bg-slate-200/80 px-2.5 py-1 text-slate-800 border-l-4 border-slate-700 mb-1.5">
+                      3. 特記事項・技術指示事項
+                    </div>
+                    <div className="border border-slate-300 rounded p-3 text-xs text-slate-800 bg-white leading-relaxed min-h-[64px] whitespace-pre-wrap">
+                      {formValues['f-notes'] || activeTemplate?.notesTemplate || '指定の検査成績書およびミルシートは納品書に同封の上、1部提出すること。製品銘板には必ず機器番号（Tag No.）を打刻すること。'}
+                    </div>
+                  </div>
+
+                  {/* Footer with Seal boxes */}
+                  <div className="flex items-end justify-between pt-4 border-t border-slate-200 mt-6 text-xs text-slate-500">
+                    <div className="text-[11px]">
+                      <div>※ 本書はSpecForgeシステムにより電子生成された正式調達仕様書です。</div>
+                      <div className="font-mono text-[10px]">DocID: {fixedDocNo} | Generated: {new Date().toISOString()}</div>
+                    </div>
+                    <table className="border-collapse border border-slate-400 text-center text-[10px] w-48">
+                      <thead>
+                        <tr className="bg-slate-100 border-b border-slate-400">
+                          <th className="p-1 border-r border-slate-300 font-normal">承認</th>
+                          <th className="p-1 border-r border-slate-300 font-normal">審査</th>
+                          <th className="p-1 font-normal">担当</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr className="h-10">
+                          <td className="border-r border-slate-300"></td>
+                          <td className="border-r border-slate-300"></td>
+                          <td className="font-sans text-slate-700 pt-3">印</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
 
-              {/* Status bar */}
-              <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-500 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+              {/* Status bar below PDF */}
+              <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-500 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                  <span>マッピングや入力値を更新した後、右上の「再読み込み」を押すと最新のPDFプレビューが反映されます。</span>
+                  <span>マッピングや入力値を更新した後、右上の「再読み込み」を押すと最新のプレビューが反映されます。</span>
                 </div>
-                {pdfUrl && (
-                  <a
-                    href={pdfUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-bold text-indigo-600 hover:text-indigo-800 underline shrink-0"
-                  >
-                    別ウィンドウでPDFを開く ↗
-                  </a>
-                )}
+                <div className="font-mono text-indigo-700 font-semibold">
+                  Doc No: {fixedDocNo}
+                </div>
               </div>
             </div>
           )}
@@ -1149,7 +1358,7 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
           {previewMode === 'excel' && (
             <div className="overflow-x-auto pb-4">
               <div 
-                style={{ transform: `scale(${previewZoom / 100})`, transformOrigin: 'top left' }}
+                style={{ transform: previewZoom !== 100 ? `scale(${previewZoom / 100})` : undefined, transformOrigin: 'top left' }}
                 className="bg-white border border-slate-300 shadow-md rounded-lg overflow-hidden min-w-[760px] transition-transform select-none"
               >
                 {/* Sheet Tabs Bar */}
@@ -1274,188 +1483,6 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
               </div>
             </div>
           )}
-        </div>
-      </div>
-
-      {/* OFFSCREEN A4 SPECIFICATION SHEET CONTAINER FOR HIGH-RES PDF GENERATION */}
-      <div
-        ref={specSheetRef}
-        style={{
-          position: 'fixed',
-          left: '-9999px',
-          top: '0',
-          width: '794px', // 210mm at 96 DPI
-          minHeight: '1123px', // 297mm at 96 DPI
-          backgroundColor: '#ffffff',
-          color: '#0f172a',
-          zIndex: -100,
-          boxSizing: 'border-box',
-          padding: '40px 44px',
-          fontFamily: '"Hiragino Sans", "Meiryo", "BIZ UDPGothic", "Yu Gothic", sans-serif',
-        }}
-      >
-        {/* Document Header */}
-        <div className="border-b-2 border-slate-900 pb-3 mb-4">
-          <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono mb-1">
-            <span>{activeTemplate?.code || 'SPEC-DOC'}</span>
-            <span>{formValues['f-date'] || new Date().toISOString().slice(0, 10)} 発行</span>
-          </div>
-          <h1 className="text-xl font-bold text-slate-900 text-center tracking-wider py-1 border-y border-slate-300 bg-slate-50">
-            【 {formValues['f-title'] || activeTemplate?.name || '機器調達仕様書'} 】
-          </h1>
-        </div>
-
-        {/* Basic Metadata Grid */}
-        <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs border border-slate-300 p-3 mb-4 bg-slate-50/60 rounded">
-          <div className="flex items-center">
-            <span className="w-24 text-slate-500 font-semibold shrink-0">仕様書番号:</span>
-            <span className="font-mono font-bold text-slate-900">{formValues['f-docno'] || fixedDocNo}</span>
-          </div>
-          <div className="flex items-center">
-            <span className="w-24 text-slate-500 font-semibold shrink-0">発行日:</span>
-            <span className="font-mono text-slate-800">{formValues['f-date'] || new Date().toISOString().slice(0, 10)}</span>
-          </div>
-          <div className="flex items-center">
-            <span className="w-24 text-slate-500 font-semibold shrink-0">工事・件名:</span>
-            <span className="font-bold text-slate-900 truncate">{formValues['f-project-name'] || currentProject?.name || '-'}</span>
-          </div>
-          <div className="flex items-center">
-            <span className="w-24 text-slate-500 font-semibold shrink-0">発行元:</span>
-            <span className="text-slate-800">{formValues['f-issuer'] || currentProject?.department || '設計部'}</span>
-          </div>
-          <div className="flex items-center">
-            <span className="w-24 text-slate-500 font-semibold shrink-0">客先名 / 発注元:</span>
-            <span className="font-medium text-slate-900 truncate">{formValues['f-client-name'] || currentProject?.clientName || '-'}</span>
-          </div>
-          <div className="flex items-center">
-            <span className="w-24 text-slate-500 font-semibold shrink-0">工事場所:</span>
-            <span className="text-slate-800 truncate">{currentProject?.location || '-'}</span>
-          </div>
-          {currentProject?.orderNo && (
-            <div className="flex items-center">
-              <span className="w-24 text-slate-500 font-semibold shrink-0">オーダーNo.:</span>
-              <span className="font-mono font-bold text-indigo-900">{currentProject.orderNo}</span>
-            </div>
-          )}
-          {(currentProject?.clientNumber || currentProject?.clientNumberPart1) && (
-            <div className="flex items-center">
-              <span className="w-24 text-slate-500 font-semibold shrink-0">客先番号:</span>
-              <span className="font-mono font-bold text-slate-800">
-                {currentProject.clientNumber || `【${currentProject.clientNumberPart1 || ''}】-【${currentProject.clientNumberPart2 || ''}】`}
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Section 1: Applied requirements & checkbox mappings */}
-        <div className="mb-4">
-          <div className="text-xs font-bold bg-slate-200/80 px-2.5 py-1 text-slate-800 border-l-4 border-slate-700 mb-2">
-            1. 適用要件・指定基準 (チェック項目 ＆ 仕様条件)
-          </div>
-          <div className="grid grid-cols-2 gap-2 text-xs border border-slate-300 p-2.5 rounded bg-white">
-            {checkFields.map(cf => {
-              const isChecked = Boolean(formValues[cf.id]);
-              const cfg = cf.checkboxConfig;
-              return (
-                <div key={cf.id} className="flex items-center justify-between p-1 border-b border-slate-100">
-                  <span className="text-slate-700 font-medium">{cf.label}:</span>
-                  <span className="font-bold font-mono">
-                    {isChecked 
-                      ? (cfg?.checkedValue || `☑ ${cfg?.labelTrue || '要'}`) 
-                      : (cfg?.uncheckedValue || `☐ ${cfg?.labelFalse || '不要'}`)}
-                  </span>
-                </div>
-              );
-            })}
-            {specFields.map(sf => (
-              <div key={sf.id} className="flex items-center justify-between p-1 border-b border-slate-100">
-                <span className="text-slate-700 font-medium">{sf.label}:</span>
-                <span className="font-semibold text-slate-900">{formValues[sf.id] || sf.defaultValue || '-'}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Section 2: Equipment details table */}
-        <div className="mb-4">
-          <div className="text-xs font-bold bg-slate-200/80 px-2.5 py-1 text-slate-800 border-l-4 border-slate-700 mb-2">
-            2. 対象機器・調達品目明細 ({activeItems.length}件)
-          </div>
-          <table className="w-full text-left text-xs border-collapse border border-slate-400">
-            <thead>
-              <tr className="bg-slate-100 font-semibold text-slate-800 border-b border-slate-400">
-                <th className="p-1.5 border-r border-slate-300 w-24">機器番号</th>
-                <th className="p-1.5 border-r border-slate-300">機器名称</th>
-                <th className="p-1.5 border-r border-slate-300">仕様・口径</th>
-                <th className="p-1.5 border-r border-slate-300 w-20">材質</th>
-                <th className="p-1.5 border-r border-slate-300 w-16 text-center">数量</th>
-                <th className="p-1.5 w-24">納期</th>
-              </tr>
-            </thead>
-            <tbody>
-              {activeItems.map((item, idx) => {
-                const specSummary = item.specs && item.specs.length > 0 
-                  ? item.specs.map(s => `${s.name}:${s.value}`).join(' / ')
-                  : (item.diameter || '-');
-                return (
-                  <tr key={item.id || idx} className="border-b border-slate-300 hover:bg-slate-50">
-                    <td className="p-1.5 border-r border-slate-300 font-mono font-bold text-slate-900">
-                      {item.tagNo || '-'}
-                    </td>
-                    <td className="p-1.5 border-r border-slate-300 font-semibold text-slate-800">
-                      {item.name}
-                    </td>
-                    <td className="p-1.5 border-r border-slate-300 text-[11px] text-slate-700">
-                      {specSummary}
-                    </td>
-                    <td className="p-1.5 border-r border-slate-300 font-mono text-slate-700">
-                      {item.material || '-'}
-                    </td>
-                    <td className="p-1.5 border-r border-slate-300 text-center font-mono">
-                      {item.quantity} {item.unit || '台'}
-                    </td>
-                    <td className="p-1.5 text-[11px] font-mono text-slate-700">
-                      {item.deliveryDate || '-'}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Section 3: Notes / Technical Instructions */}
-        <div className="mb-4">
-          <div className="text-xs font-bold bg-slate-200/80 px-2.5 py-1 text-slate-800 border-l-4 border-slate-700 mb-1.5">
-            3. 特記事項・技術指示事項
-          </div>
-          <div className="border border-slate-300 rounded p-3 text-xs text-slate-800 bg-white leading-relaxed min-h-[64px] whitespace-pre-wrap">
-            {formValues['f-notes'] || activeTemplate?.notesTemplate || '指定の検査成績書およびミルシートは納品書に同封の上、1部提出すること。製品銘板には必ず機器番号（Tag No.）を打刻すること。'}
-          </div>
-        </div>
-
-        {/* Footer with Seal boxes */}
-        <div className="flex items-end justify-between pt-4 border-t border-slate-200 mt-6 text-xs text-slate-500">
-          <div className="text-[11px]">
-            <div>※ 本書はSpecForgeシステムにより電子生成された正式調達仕様書です。</div>
-            <div className="font-mono text-[10px]">DocID: {fixedDocNo} | Generated: {new Date().toISOString()}</div>
-          </div>
-          <table className="border-collapse border border-slate-400 text-center text-[10px] w-48">
-            <thead>
-              <tr className="bg-slate-100 border-b border-slate-400">
-                <th className="p-1 border-r border-slate-300 font-normal">承認</th>
-                <th className="p-1 border-r border-slate-300 font-normal">審査</th>
-                <th className="p-1 font-normal">担当</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="h-10">
-                <td className="border-r border-slate-300"></td>
-                <td className="border-r border-slate-300"></td>
-                <td className="font-sans text-slate-700 pt-3">印</td>
-              </tr>
-            </tbody>
-          </table>
         </div>
       </div>
     </div>

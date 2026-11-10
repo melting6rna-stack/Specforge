@@ -330,6 +330,9 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
       id: `f-spec-${Date.now()}`,
       label: labelChoice,
       cell: 'C11',
+      cellSlot2: '',
+      cellSlot3: '',
+      cellSlot4: '',
       type: 'text',
       group: 'spec',
       defaultValue: '',
@@ -700,10 +703,13 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                   <table className="w-full text-left text-xs border-collapse">
                     <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
                       <tr>
-                        <th className="p-2 w-56">項目ラベル (機器仕様項目から選択)</th>
-                        <th className="p-2 w-32">セル番地</th>
-                        <th className="p-2">プレビュー初期値 / 説明</th>
-                        {isEditing && <th className="p-2 text-right w-14">操作</th>}
+                        <th className="p-2 w-48">項目ラベル (仕様項目)</th>
+                        <th className="p-2 w-24">1種類目 (メイン)</th>
+                        <th className="p-2 w-24">2種類目</th>
+                        <th className="p-2 w-24">3種類目</th>
+                        <th className="p-2 w-24">4種類目</th>
+                        <th className="p-2">初期値 / 説明</th>
+                        {isEditing && <th className="p-2 text-right w-12">操作</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -715,7 +721,16 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                                 {field.label}
                               </td>
                               <td className="p-2 font-mono font-bold text-indigo-700">
-                                {field.cell}
+                                {field.cell || '-'}
+                              </td>
+                              <td className="p-2 font-mono text-slate-700">
+                                {field.cellSlot2 || '-'}
+                              </td>
+                              <td className="p-2 font-mono text-slate-700">
+                                {field.cellSlot3 || '-'}
+                              </td>
+                              <td className="p-2 font-mono text-slate-700">
+                                {field.cellSlot4 || '-'}
                               </td>
                               <td className="p-2 text-[11px] text-slate-500">
                                 {String(field.defaultValue || field.placeholder || '-')}
@@ -741,13 +756,48 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                                 )}
                               </select>
                             </td>
+                            {/* 1種類目 */}
                             <td className="p-2">
                               <input
                                 type="text"
-                                value={field.cell}
+                                value={field.cell || ''}
                                 onChange={(e) => handleUpdateField(field.id, { cell: e.target.value.toUpperCase() })}
-                                className="w-full text-xs font-mono font-bold bg-white border border-indigo-300 rounded px-2 py-1 text-indigo-800"
-                                placeholder="C8, E30..."
+                                className="w-full text-xs font-mono font-bold bg-white border border-indigo-300 rounded px-2 py-1 text-indigo-800 placeholder-slate-300"
+                                placeholder="C15"
+                                title="1種類目のセル番地"
+                              />
+                            </td>
+                            {/* 2種類目 */}
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                value={field.cellSlot2 || ''}
+                                onChange={(e) => handleUpdateField(field.id, { cellSlot2: e.target.value.toUpperCase() })}
+                                className="w-full text-xs font-mono bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 placeholder-slate-300"
+                                placeholder="D15"
+                                title="2種類目のセル番地"
+                              />
+                            </td>
+                            {/* 3種類目 */}
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                value={field.cellSlot3 || ''}
+                                onChange={(e) => handleUpdateField(field.id, { cellSlot3: e.target.value.toUpperCase() })}
+                                className="w-full text-xs font-mono bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 placeholder-slate-300"
+                                placeholder="E15"
+                                title="3種類目のセル番地"
+                              />
+                            </td>
+                            {/* 4種類目 */}
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                value={field.cellSlot4 || ''}
+                                onChange={(e) => handleUpdateField(field.id, { cellSlot4: e.target.value.toUpperCase() })}
+                                className="w-full text-xs font-mono bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 placeholder-slate-300"
+                                placeholder="F15"
+                                title="4種類目のセル番地"
                               />
                             </td>
                             <td className="p-2">
@@ -755,7 +805,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                                 type="text"
                                 value={String(field.defaultValue ?? '')}
                                 onChange={(e) => handleUpdateField(field.id, { defaultValue: e.target.value })}
-                                placeholder="初期値またはプレースホルダー"
+                                placeholder="初期値 / 備考"
                                 className="w-full text-xs bg-white border border-slate-300 rounded px-2 py-1"
                               />
                             </td>

@@ -33,6 +33,7 @@ export interface EquipmentItem {
   unit: string; // 数量の単位 (台, 個, 基, 本)
   diameter?: string; // 口径 (下位互換)
   material?: string; // 材質 (下位互換)
+  equipmentType?: string; // 機器種別 (アルファベット2文字, 例: VA, PU, TK, HE)
   deliveryDate: string; // 納入時期 (必須, 例: 2026-05-15, 2026年5月下旬)
   categoryId: string; // カテゴリID
   deliveryLocation?: string; // 納入場所
@@ -81,7 +82,10 @@ export interface CellMappingField {
 export interface SpecFieldMapping {
   id: string;
   label: string; // 画面表示名 (例: 工事名称, 水圧試験要否, 提出書類...)
-  cell: string; // セル座標 (例: C4, F10, E30)
+  cell: string; // 1種類目のセル座標 (例: C4, F10, E30)
+  cellSlot2?: string; // 2種類目のセル座標 (例: D4, G10, F30)
+  cellSlot3?: string; // 3種類目のセル座標 (例: E4, H10, G30)
+  cellSlot4?: string; // 4種類目のセル座標 (例: F4, I10, H30)
   labelCell?: string; // 項目名・ラベルのセル座標 (チェックボックス項目などで使用, 例: C8, E8)
   type: 'text' | 'textarea' | 'select' | 'checkbox' | 'date';
   group?: 'basic' | 'spec' | 'check' | 'notes' | string; // グループ分類

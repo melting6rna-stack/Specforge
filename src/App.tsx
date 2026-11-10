@@ -694,6 +694,47 @@ export default function App() {
     setTimeout(() => setSyncNotice(''), 5000);
   };
 
+  // Batch update equipment types across multiple items
+  const handleBatchUpdateEquipmentType = (itemIds: string[], newEquipmentType: string) => {
+    if (!itemIds.length) return;
+    const nowStr = new Date().toLocaleString('ja-JP', { hour12: false });
+    const formattedType = newEquipmentType.trim().toUpperCase();
+
+    setItems(prev => {
+      const nextList = prev.map(it => {
+        if (itemIds.includes(it.id)) {
+          const oldType = it.equipmentType || '-';
+          const typeLog: ChangeLog = {
+            id: `hist-type-${Date.now()}-${it.id.slice(-4)}`,
+            itemId: it.id,
+            timestamp: nowStr,
+            author: '一括変更',
+            field: 'equipmentType',
+            fieldLabel: '機器種別',
+            oldValue: oldType,
+            newValue: formattedType,
+            reason: `機器種別の一括更新 (${itemIds.length}件)`
+          };
+          return {
+            ...it,
+            equipmentType: formattedType,
+            history: [typeLog, ...(it.history || [])],
+            updatedAt: nowStr.slice(0, 10)
+          };
+        }
+        return it;
+      });
+
+      const projectItems = nextList.filter(it => it.projectId === activeProjectId);
+      persistItemsToLinkedJson(activeProjectId, projectItems);
+      return nextList;
+    });
+
+    setHasUnsavedChanges(true);
+    setSyncNotice(`${itemIds.length}件の機器種別を「${formattedType}」へ一括変更しました。`);
+    setTimeout(() => setSyncNotice(''), 5000);
+  };
+
   // Batch move multiple items to target category
   const handleBatchMoveToCategory = (itemIds: string[], targetCategoryId: string) => {
     if (!itemIds.length) return;
@@ -956,6 +997,7 @@ export default function App() {
             onDeleteCategory={handleDeleteCategory}
             onMoveItemToCategory={handleMoveItemToCategory}
             onBatchUpdateDeliveryDate={handleBatchUpdateDeliveryDate}
+            onBatchUpdateEquipmentType={handleBatchUpdateEquipmentType}
             onBatchMoveToCategory={handleBatchMoveToCategory}
             onReorderItems={handleReorderItems}
             hasUnsavedChanges={hasUnsavedChanges}
