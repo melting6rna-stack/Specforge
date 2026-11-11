@@ -207,6 +207,8 @@ export async function parseEquipmentExcel(
     const unit = rowObj['単位'] || '台';
     const deliveryDate = rowObj['納期'] || rowObj['希望納期'] || rowObj['納入時期'] || '';
     const notes = rowObj['備考'] || rowObj['特記事項'] || '';
+    const rawIssued = rowObj['発行'] || rowObj['発行状態'] || rowObj['仕様書発行'] || '';
+    const isIssued = rawIssued === '済' || rawIssued.includes('発行済') || rawIssued === 'true' || rawIssued === '1';
 
     // Build specs array with diameter and material
     const specs: EquipmentSpecParam[] = [];
@@ -231,12 +233,14 @@ export async function parseEquipmentExcel(
       id: `eq-imp-${Date.now()}-${i}`,
       projectId,
       tagNo,
+      classification: tagNo.startsWith('04-') ? '04' : '03',
       name,
       quantity,
       unit,
       diameter: diameter || '-',
       material: material || '-',
       deliveryDate,
+      isIssued,
       categoryId,
       deliveryLocation: '指定納入場所',
       notes,

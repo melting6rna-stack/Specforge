@@ -86,6 +86,9 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
   const [batchEquipmentTypeValue, setBatchEquipmentTypeValue] = useState<string>('');
   const [isBatchCategoryMenuOpen, setIsBatchCategoryMenuOpen] = useState<boolean>(false);
 
+  // Classification filter: 'all', '03' (購入品), '04' (製作品)
+  const [classificationFilter, setClassificationFilter] = useState<'all' | '03' | '04'>('all');
+
   // Sorting state: 'manual' (D&D order), 'tagNo', 'deliveryDate'
   const [sortField, setSortField] = useState<'manual' | 'tagNo' | 'deliveryDate'>('manual');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
@@ -97,10 +100,16 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
   // Filter items for current project
   const projectItems = items.filter(it => it.projectId === activeProjectId);
 
-  // Filter items by category & search
+  // Filter items by category, classification & search
   const filteredItems = projectItems.filter(item => {
     if (selectedCategoryId !== 'all' && item.categoryId !== selectedCategoryId) {
       return false;
+    }
+    if (classificationFilter !== 'all') {
+      const is03 = item.classification === '03' || item.tagNo?.startsWith('03-');
+      const is04 = item.classification === '04' || item.tagNo?.startsWith('04-');
+      if (classificationFilter === '03' && !is03) return false;
+      if (classificationFilter === '04' && !is04) return false;
     }
     if (searchTerm) {
       const q = searchTerm.toLowerCase();
@@ -113,6 +122,7 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
         (item.material && item.material.toLowerCase().includes(q)) ||
         (item.notes && item.notes.toLowerCase().includes(q)) ||
         (item.deliveryDate && item.deliveryDate.toLowerCase().includes(q)) ||
+        (item.isIssued ? '済 発行済' : '未 未発行').includes(q) ||
         specText.includes(q);
       if (!match) return false;
     }
@@ -521,6 +531,63 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
             })}
           </div>
         </div>
+
+        {/* Classification Filter Card (03: 購入品 / 04: 製作品) */}
+        <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-2xs space-y-2">
+          <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
+            <span>機器区分 (ナンバリング)</span>
+          </div>
+          <div className="space-y-1">
+            <button
+              type="button"
+              onClick={() => setClassificationFilter('all')}
+              className={`w-full text-left p-2 rounded-lg text-xs font-medium flex items-center justify-between transition-colors cursor-pointer ${
+                classificationFilter === 'all'
+                  ? 'bg-slate-900 text-white shadow-2xs'
+                  : 'text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <span>区分すべて</span>
+              <span className={`text-[11px] font-mono tabular-nums ${classificationFilter === 'all' ? 'text-slate-300' : 'text-slate-400'}`}>
+                {projectItems.length}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setClassificationFilter('03')}
+              className={`w-full text-left p-2 rounded-lg text-xs font-medium flex items-center justify-between transition-colors cursor-pointer ${
+                classificationFilter === '03'
+                  ? 'bg-sky-600 text-white shadow-2xs'
+                  : 'text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono font-bold text-[11px] px-1 py-0.2 rounded bg-sky-100 text-sky-800">03</span>
+                <span>購入品</span>
+              </div>
+              <span className={`text-[11px] font-mono tabular-nums ${classificationFilter === '03' ? 'text-sky-100' : 'text-slate-400'}`}>
+                {projectItems.filter(it => it.classification === '03' || it.tagNo?.startsWith('03-')).length}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setClassificationFilter('04')}
+              className={`w-full text-left p-2 rounded-lg text-xs font-medium flex items-center justify-between transition-colors cursor-pointer ${
+                classificationFilter === '04'
+                  ? 'bg-amber-600 text-white shadow-2xs'
+                  : 'text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono font-bold text-[11px] px-1 py-0.2 rounded bg-amber-100 text-amber-900">04</span>
+                <span>製作品</span>
+              </div>
+              <span className={`text-[11px] font-mono tabular-nums ${classificationFilter === '04' ? 'text-amber-100' : 'text-slate-400'}`}>
+                {projectItems.filter(it => it.classification === '04' || it.tagNo?.startsWith('04-')).length}
+              </span>
+            </button>
+          </div>
+        </div>
       </div>
 
         {/* Right Column: 機器一覧テーブル (9 cols) */}
@@ -748,13 +815,18 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                       </div>
                     </th>
 
+                    {/* 発行欄 (未か済で表記) */}
+                    <th className="py-2.5 px-3 whitespace-nowrap text-center">
+                      発行
+                    </th>
+
                     <th className="py-2.5 px-3 text-right whitespace-nowrap">操作</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {sortedItems.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="py-12 text-center text-slate-400">
+                      <td colSpan={11} className="py-12 text-center text-slate-400">
                         該当する機器データがありません。「機器を追加」または「Excel読込」から登録してください。
                       </td>
                     </tr>
@@ -778,7 +850,9 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                           onClick={() => onEditItem(item)}
                           className={`transition-colors group cursor-pointer ${dropIndicatorClass} ${
                             isSelected 
-                              ? 'bg-indigo-50/60 hover:bg-indigo-50/90' 
+                              ? 'bg-indigo-50/70 hover:bg-indigo-50/90' 
+                              : item.isIssued
+                              ? 'bg-slate-200/60 hover:bg-slate-200/80 text-slate-700'
                               : 'hover:bg-slate-50'
                           }`}
                         >
@@ -805,18 +879,13 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                             <GripVertical className="w-4 h-4 mx-auto" />
                           </td>
 
-                          {/* 機器種別 (2文字) */}
-                          <td className="py-3 px-3 whitespace-nowrap">
-                            {item.equipmentType ? (
-                              <span className="font-mono font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded text-[11px]">
-                                {item.equipmentType.toUpperCase()}
-                              </span>
-                            ) : (
-                              <span className="text-slate-300 font-mono text-[11px]">-</span>
-                            )}
+                          {/* 機器種別 (囲みなしプレーン文字列) */}
+                          <td className="py-3 px-3 font-mono font-bold text-slate-700 whitespace-nowrap">
+                            {item.equipmentType ? item.equipmentType.toUpperCase() : '-'}
                           </td>
 
-                          <td className="py-3 px-3 font-mono font-semibold text-slate-800 whitespace-nowrap">
+                          {/* 機器番号 (購入品・製作品マークなしプレーン表示) */}
+                          <td className="py-3 px-3 font-mono font-bold text-slate-800 whitespace-nowrap">
                             {item.tagNo || '-'}
                           </td>
 
@@ -895,6 +964,13 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                               </span>
                               <Calendar className="w-3.5 h-3.5 text-slate-300 group-hover/deliv:text-indigo-600 transition-colors opacity-0 group-hover/deliv:opacity-100 shrink-0" />
                             </div>
+                          </td>
+
+                          {/* 発行 (表示専用: 文字列のみ・済の行は背景色30%グレー) */}
+                          <td className="py-3 px-3 text-center whitespace-nowrap select-none text-xs">
+                            <span className={item.isIssued ? 'font-bold text-slate-800' : 'text-slate-400'}>
+                              {item.isIssued ? '済' : '未'}
+                            </span>
                           </td>
 
                           <td className="py-3 px-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>

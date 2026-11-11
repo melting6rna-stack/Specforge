@@ -24,10 +24,13 @@ export interface EquipmentSpecParam {
   unit: string; // 単位 (例: A, kW, m³/h, m, MPa, V等)
 }
 
+export type EquipmentClassification = '03' | '04'; // '03': 購入品, '04': 製作品
+
 export interface EquipmentItem {
   id: string;
   projectId: string;
-  tagNo: string; // 機器番号・タグ (例: EQ-001, V-101, P-01)
+  tagNo: string; // 機器番号・タグ (例: 03-001, 04-001)
+  classification?: EquipmentClassification; // 機器区分 ('03': 購入品, '04': 製作品)
   name: string; // 機器名 (必須)
   quantity: number; // 数量 (必須)
   unit: string; // 数量の単位 (台, 個, 基, 本)
@@ -35,6 +38,7 @@ export interface EquipmentItem {
   material?: string; // 材質 (下位互換)
   equipmentType?: string; // 機器種別 (アルファベット2文字, 例: VA, PU, TK, HE)
   deliveryDate: string; // 納入時期 (必須, 例: 2026-05-15, 2026年5月下旬)
+  isIssued?: boolean; // 発行状態 (true: 済, false/undefined: 未)
   categoryId: string; // カテゴリID
   deliveryLocation?: string; // 納入場所
   notes?: string; // 特記事項・指示事項

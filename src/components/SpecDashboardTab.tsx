@@ -784,6 +784,17 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                       <span className="font-semibold text-slate-800">{primaryItem.deliveryDate}</span>
                     </span>
                   )}
+
+                  <span className={`inline-flex items-center gap-1 border px-2 py-1 rounded text-[11px] font-mono ${
+                    primaryItem.isIssued
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300 font-bold'
+                      : 'bg-white text-slate-600 border-slate-200'
+                  }`}>
+                    <span className="font-sans text-slate-500">発行:</span>
+                    <span className={primaryItem.isIssued ? 'text-emerald-700' : 'text-slate-500'}>
+                      {primaryItem.isIssued ? '済' : '未'}
+                    </span>
+                  </span>
                 </div>
 
                 <div className="text-[10px] text-slate-400">

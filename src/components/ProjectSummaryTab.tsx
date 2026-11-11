@@ -47,6 +47,7 @@ interface ProjectSummaryTabProps {
   onSwitchToDatabase: () => void;
   isSyncing: boolean;
   onInstallPwa?: () => void;
+  onDeleteProject?: (projectId: string) => void;
 }
 
 const parseClientNumberParts = (val?: string, part1?: string, part2?: string) => {
@@ -92,6 +93,7 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
   onSwitchToDatabase,
   isSyncing,
   onInstallPwa,
+  onDeleteProject,
 }) => {
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [selectedProjectForEdit, setSelectedProjectForEdit] = useState<ProjectWorkspace | null>(null);
@@ -982,6 +984,7 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
           setSelectedProjectForEdit(null);
         }}
         onRelinkJson={onRelinkProjectFile}
+        onDeleteProject={onDeleteProject}
       />
 
     </div>

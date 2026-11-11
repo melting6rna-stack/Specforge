@@ -11,7 +11,8 @@ import {
   HardDrive, 
   Save, 
   Calendar,
-  AlertTriangle
+  AlertTriangle,
+  Trash2
 } from 'lucide-react';
 import { ProjectWorkspace } from '../types';
 
@@ -21,6 +22,7 @@ interface ProjectDetailModalProps {
   onClose: () => void;
   onSave: (updated: ProjectWorkspace) => void;
   onRelinkJson?: (projectId: string) => void;
+  onDeleteProject?: (projectId: string) => void;
 }
 
 const parseClientNumberParts = (val?: string, part1?: string, part2?: string) => {
@@ -56,7 +58,8 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
   project,
   onClose,
   onSave,
-  onRelinkJson
+  onRelinkJson,
+  onDeleteProject
 }) => {
   if (!isOpen || !project) return null;
 
@@ -79,6 +82,9 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
   const [validationError, setValidationError] = useState('');
   const [isSavedSuccess, setIsSavedSuccess] = useState(false);
 
+  // 2-cushion deletion state (0: normal, 1: first cushion confirmation, 2: second cushion final confirmation)
+  const [deleteStep, setDeleteStep] = useState<0 | 1 | 2>(0);
+
   useEffect(() => {
     if (project) {
       setOrderNo(project.orderNo || '');
@@ -98,6 +104,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
       setDescription(project.description || '');
       setValidationError('');
       setIsSavedSuccess(false);
+      setDeleteStep(0);
     }
   }, [project]);
 
@@ -371,22 +378,109 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
             )}
           </div>
 
-          {/* Modal Footer Actions */}
-          <div className="pt-2 flex items-center justify-end gap-2.5 border-t border-slate-200">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
-            >
-              キャンセル
-            </button>
-            <button
-              type="submit"
-              className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>保存して仕様書に反映</span>
-            </button>
+          {/* Modal Footer Actions & 2-Cushion Deletion */}
+          <div className="pt-3 border-t border-slate-200 space-y-3">
+            {deleteStep === 0 ? (
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                {/* Small delete button at the bottom left */}
+                {onDeleteProject ? (
+                  <button
+                    type="button"
+                    onClick={() => setDeleteStep(1)}
+                    className="inline-flex items-center justify-center gap-1.5 text-[11px] text-red-600 hover:text-red-700 hover:bg-red-50 px-2.5 py-1.5 rounded-lg border border-red-200/80 transition-colors cursor-pointer self-start"
+                    title="この案件登録を画面から削除（※PC上のJSONファイルは消去されず安全に保持されます）"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                    <span>この案件登録を削除</span>
+                  </button>
+                ) : <div />}
+
+                <div className="flex items-center justify-end gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeleteStep(0);
+                      onClose();
+                    }}
+                    className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>保存して仕様書に反映</span>
+                  </button>
+                </div>
+              </div>
+            ) : deleteStep === 1 ? (
+              /* Cushion 1: First check */
+              <div className="p-3.5 bg-amber-50/90 border border-amber-200 rounded-xl space-y-2.5 animate-in fade-in duration-150">
+                <div className="flex items-start gap-2.5 text-amber-950">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="text-[11px] leading-relaxed">
+                    <p className="font-bold text-amber-900">【確認 1/2】この案件を画面の登録一覧から削除しますか？</p>
+                    <p className="text-amber-800 text-[11px] mt-0.5">
+                      ※ 画面上の一覧・作業リストからのみ消去されます。<strong className="font-bold underline text-amber-950">PC上に保存されているJSONファイルは絶対に消去されず安全にそのまま保持されます。</strong>（後からいつでもJSONファイルを開いて再読み込みできます）
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-end gap-2 pt-1 border-t border-amber-200/60">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteStep(0)}
+                    className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer"
+                  >
+                    取り消す
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteStep(2)}
+                    className="px-3.5 py-1.5 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-md shadow-2xs transition-colors cursor-pointer"
+                  >
+                    次へ進む (最終確認へ)
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Cushion 2: Second and final check */
+              <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl space-y-2.5 animate-in fade-in duration-150">
+                <div className="flex items-start gap-2.5 text-red-950">
+                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                  <div className="text-[11px] leading-relaxed">
+                    <p className="font-bold text-red-800">【最終確認 2/2】本当にこの案件登録を画面から削除しますか？</p>
+                    <p className="text-red-700 text-[11px] mt-0.5">
+                      ※ 削除されるのはあくまで画面・ブラウザ上の登録情報のみです。<strong className="font-bold underline text-red-900">PCのディスク上にあるJSONファイル実体は一切削除されません。</strong>
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-end gap-2 pt-1 border-t border-red-200/60">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteStep(0)}
+                    className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer"
+                  >
+                    やめる
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onDeleteProject) {
+                        onDeleteProject(project.id);
+                      }
+                      setDeleteStep(0);
+                      onClose();
+                    }}
+                    className="px-3.5 py-1.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-md shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>画面の登録を削除する</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
         </form>

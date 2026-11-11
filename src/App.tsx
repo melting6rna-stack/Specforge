@@ -9,7 +9,8 @@ import { ItemCreateModal } from './components/ItemCreateModal';
 import { ChangeHistoryModal } from './components/ChangeHistoryModal';
 import { PwaInstallGuideModal } from './components/PwaInstallGuideModal';
 import { UnsavedChangesModal } from './components/UnsavedChangesModal';
-import { EquipmentItem, Category, SpecTemplate, ProjectWorkspace, ChangeLog } from './types';
+import { EquipmentItem, Category, SpecTemplate, ProjectWorkspace, ChangeLog, EquipmentClassification } from './types';
+import { placeItemWithResequence, resequenceProjectItems } from './utils/tagNumbering';
 import { DEFAULT_TEMPLATES } from './data/defaultTemplates';
 import { INITIAL_PROJECTS, INITIAL_CATEGORIES, INITIAL_ITEMS } from './data/sampleOrders';
 import { parseEquipmentExcel } from './utils/excelTemplateParser';
@@ -524,6 +525,53 @@ export default function App() {
     setHasUnsavedChanges(true);
   };
 
+  // Delete project registration from UI state & browser storage only (NEVER touch or delete the JSON file on disk!)
+  const handleDeleteProjectRegistration = async (projectId: string) => {
+    const targetProject = projects.find(p => p.id === projectId);
+    const projectName = targetProject ? targetProject.name : '対象案件';
+
+    // 1. Remove from projects state & localStorage
+    const remainingProjects = projects.filter(p => p.id !== projectId);
+    
+    // Ensure at least one project exists in the workspace
+    let nextActiveId = '';
+    if (remainingProjects.length > 0) {
+      nextActiveId = activeProjectId === projectId ? remainingProjects[0].id : activeProjectId;
+    } else {
+      const fallbackProject: ProjectWorkspace = {
+        id: `prj-${Date.now()}`,
+        name: '新規案件',
+        code: 'PRJ-001',
+        orderNo: '',
+        clientName: '未設定',
+        clientNumber: '',
+        description: '',
+        createdAt: new Date().toISOString()
+      };
+      remainingProjects.push(fallbackProject);
+      nextActiveId = fallbackProject.id;
+    }
+
+    setProjects(remainingProjects);
+    localStorage.setItem('specforge_projects_v2', JSON.stringify(remainingProjects));
+
+    // 2. Remove in-memory items and categories associated with this project
+    setItems(prev => prev.filter(it => it.projectId !== projectId));
+    setCategories(prev => prev.filter(c => c.projectId !== projectId));
+
+    // 3. Remove handle from browser IndexedDB only (does NOT delete or touch the JSON file on the user's PC!)
+    await removeSavedFileHandleForProject(projectId);
+    if (activeProjectId === projectId) {
+      activeFileHandleRef.current = null;
+    }
+
+    setActiveProjectId(nextActiveId);
+    setHasUnsavedChanges(false);
+
+    setSyncNotice(`「${projectName}」の画面上登録を削除しました。（※PC上のJSONファイルは消去されず安全に保持されています）`);
+    setTimeout(() => setSyncNotice(''), 7000);
+  };
+
   // Manual save to linked JSON file
   const handleManualSaveJson = async () => {
     if (!activeProjectId) return;
@@ -546,7 +594,9 @@ export default function App() {
   const handleReorderItems = (reorderedProjectItems: EquipmentItem[]) => {
     setItems(prev => {
       const otherItems = prev.filter(it => it.projectId !== activeProjectId);
-      const nextList = [...reorderedProjectItems, ...otherItems];
+      const resequenced = resequenceProjectItems(reorderedProjectItems);
+      const nextList = [...resequenced, ...otherItems];
+      persistItemsToLinkedJson(activeProjectId, resequenced);
       return nextList;
     });
     setHasUnsavedChanges(true);
@@ -777,16 +827,77 @@ export default function App() {
     setTimeout(() => setSyncNotice(''), 5000);
   };
 
+  // Batch update issue status (済 / 未) across multiple items
+  const handleBatchUpdateIssueStatus = (itemIds: string[], isIssued: boolean) => {
+    if (!itemIds.length) return;
+    const nowStr = new Date().toLocaleString('ja-JP', { hour12: false });
+    const statusText = isIssued ? '済' : '未';
+
+    setItems(prev => {
+      const nextList = prev.map(it => {
+        if (itemIds.includes(it.id)) {
+          const oldStatus = it.isIssued ? '済' : '未';
+          const issueLog: ChangeLog = {
+            id: `hist-issue-${Date.now()}-${it.id.slice(-4)}`,
+            itemId: it.id,
+            timestamp: nowStr,
+            author: '設計担当',
+            field: 'isIssued',
+            fieldLabel: '仕様書発行状態',
+            oldValue: oldStatus,
+            newValue: statusText,
+            reason: `発行状態の更新 (${statusText})`
+          };
+          return {
+            ...it,
+            isIssued,
+            history: [issueLog, ...(it.history || [])],
+            updatedAt: nowStr.slice(0, 10)
+          };
+        }
+        return it;
+      });
+
+      const projectItems = nextList.filter(it => it.projectId === activeProjectId);
+      persistItemsToLinkedJson(activeProjectId, projectItems);
+      return nextList;
+    });
+
+    setHasUnsavedChanges(true);
+    setSyncNotice(`${itemIds.length}件の発行状態を「${statusText}」へ更新しました。`);
+    setTimeout(() => setSyncNotice(''), 5000);
+  };
+
+  const handleToggleSingleItemIssue = (item: EquipmentItem) => {
+    handleBatchUpdateIssueStatus([item.id], !item.isIssued);
+  };
+
   // Item CRUD
   const handleAddNewItem = () => {
     setIsCreateModalOpen(true);
   };
 
-  const handleCreateItem = (newItem: EquipmentItem) => {
+  const handleCreateItem = (
+    newItem: EquipmentItem,
+    targetClassification?: EquipmentClassification,
+    targetSeq?: number
+  ) => {
     setItems(prev => {
-      const nextList = [newItem, ...prev];
-      const projectItems = nextList.filter(it => it.projectId === activeProjectId);
-      persistItemsToLinkedJson(activeProjectId, projectItems);
+      const currentProjectItems = prev.filter(it => it.projectId === activeProjectId);
+      const otherItems = prev.filter(it => it.projectId !== activeProjectId);
+
+      const cls = targetClassification || newItem.classification || '03';
+      const seq = targetSeq || (currentProjectItems.filter(it => (it.classification || '03') === cls).length + 1);
+
+      const resequencedProject = placeItemWithResequence(
+        currentProjectItems,
+        newItem,
+        cls,
+        seq
+      );
+
+      const nextList = [...resequencedProject, ...otherItems];
+      persistItemsToLinkedJson(activeProjectId, resequencedProject);
       return nextList;
     });
     setHasUnsavedChanges(true);
@@ -797,11 +908,27 @@ export default function App() {
     setIsEditModalOpen(true);
   };
 
-  const handleSaveItem = (updatedItem: EquipmentItem) => {
+  const handleSaveItem = (
+    updatedItem: EquipmentItem,
+    targetClassification?: EquipmentClassification,
+    targetSeq?: number
+  ) => {
     setItems(prev => {
-      const nextList = prev.map(i => i.id === updatedItem.id ? updatedItem : i);
-      const projectItems = nextList.filter(it => it.projectId === activeProjectId);
-      persistItemsToLinkedJson(activeProjectId, projectItems);
+      const currentProjectItems = prev.filter(it => it.projectId === activeProjectId);
+      const otherItems = prev.filter(it => it.projectId !== activeProjectId);
+
+      const cls = targetClassification || updatedItem.classification || '03';
+      const seq = targetSeq || 1;
+
+      const resequencedProject = placeItemWithResequence(
+        currentProjectItems,
+        updatedItem,
+        cls,
+        seq
+      );
+
+      const nextList = [...resequencedProject, ...otherItems];
+      persistItemsToLinkedJson(activeProjectId, resequencedProject);
       return nextList;
     });
     setHasUnsavedChanges(true);
@@ -810,9 +937,11 @@ export default function App() {
   const handleDeleteItem = (itemId: string) => {
     if (window.confirm('この機器データを削除してもよろしいですか？（紐づけ先JSONファイルからも削除されます）')) {
       setItems(prev => {
-        const nextList = prev.filter(i => i.id !== itemId);
-        const projectItems = nextList.filter(it => it.projectId === activeProjectId);
-        persistItemsToLinkedJson(activeProjectId, projectItems);
+        const remainingProject = prev.filter(it => it.projectId === activeProjectId && it.id !== itemId);
+        const otherItems = prev.filter(it => it.projectId !== activeProjectId);
+        const resequencedProject = resequenceProjectItems(remainingProject);
+        const nextList = [...resequencedProject, ...otherItems];
+        persistItemsToLinkedJson(activeProjectId, resequencedProject);
         return nextList;
       });
       setHasUnsavedChanges(true);
@@ -1048,6 +1177,7 @@ export default function App() {
             onSwitchToDatabase={() => setActiveTab('database')}
             isSyncing={isSyncing}
             onInstallPwa={handleInstallPwa}
+            onDeleteProject={handleDeleteProjectRegistration}
           />
         )}
 
@@ -1061,6 +1191,7 @@ export default function App() {
         categories={projectCategories}
         projectId={activeProjectId}
         existingCount={items.filter(i => i.projectId === activeProjectId).length}
+        existingItems={items.filter(i => i.projectId === activeProjectId)}
       />
 
       {/* Item Edit Modal */}
@@ -1074,6 +1205,7 @@ export default function App() {
             setEditingItem(null);
           }}
           onSave={handleSaveItem}
+          existingItems={items.filter(i => i.projectId === activeProjectId)}
         />
       )}
 
