@@ -233,7 +233,7 @@ export async function parseEquipmentExcel(
       id: `eq-imp-${Date.now()}-${i}`,
       projectId,
       tagNo,
-      classification: tagNo.startsWith('04-') ? '04' : '03',
+      classification: tagNo.startsWith('08-') ? '08' : (tagNo.startsWith('04-') ? '04' : '03'),
       name,
       quantity,
       unit,

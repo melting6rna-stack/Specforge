@@ -481,9 +481,15 @@ export interface RenderedCellData {
   isBold?: boolean;
   fontSize?: number;
   fontColor?: string;
+  fontFamily?: string;
   align?: 'left' | 'center' | 'right';
   verticalAlign?: 'top' | 'middle' | 'bottom';
   bgColor?: string;
+  wrapText?: boolean;
+  borderTopStyle?: string;
+  borderBottomStyle?: string;
+  borderLeftStyle?: string;
+  borderRightStyle?: string;
   hasBorder?: boolean;
   borderTop?: boolean;
   borderBottom?: boolean;
@@ -531,6 +537,29 @@ function colIndexToLetter(colIndex: number): string {
     temp = Math.floor((temp - 1) / 26);
   }
   return letter;
+}
+
+function formatExcelBorder(borderItem: any): string | undefined {
+  if (!borderItem) return undefined;
+  const style = typeof borderItem === 'string' ? borderItem : borderItem.style;
+  if (!style) return undefined;
+
+  let width = '1px';
+  let type = 'solid';
+  if (style === 'medium') width = '2px';
+  else if (style === 'thick') width = '2.5px';
+  else if (style === 'double') { width = '3px'; type = 'double'; }
+  else if (style === 'dotted') type = 'dotted';
+  else if (style === 'dashed') type = 'dashed';
+  else if (style === 'hair') width = '1px';
+
+  let color = '#334155';
+  if (borderItem.color && typeof borderItem.color === 'object') {
+    const argb = String(borderItem.color.argb || '');
+    if (argb.length === 8) color = `#${argb.slice(2)}`;
+    else if (argb.length === 6) color = `#${argb}`;
+  }
+  return `${width} ${type} ${color}`;
 }
 
 interface MergeRangeInfo {
@@ -769,32 +798,46 @@ export async function renderSpecificationExcelGrid(
     });
   });
 
-  maxColIndex = Math.min(Math.max(maxColIndex, 8), 26); // Min H (8), Max Z (26)
-  maxRowIndex = Math.min(Math.max(maxRowIndex, 28), 90);  // Min 28, Max 90
+  maxColIndex = Math.min(Math.max(maxColIndex, 8), 40); // Min H (8), Max 40 columns
+  maxRowIndex = Math.min(Math.max(maxRowIndex, 24), 120); // Min 24 rows, Max 120 rows
 
-  // Build columns definition
+  // Build columns definition with accurate Excel width to pixel conversion
+  const defaultColWidth = (worksheet.properties && typeof (worksheet.properties as any).defaultColWidth === 'number' && (worksheet.properties as any).defaultColWidth > 0)
+    ? (worksheet.properties as any).defaultColWidth
+    : 8.43;
+
   const columns: { colLetter: string; width: number }[] = [];
   for (let c = 1; c <= maxColIndex; c++) {
     const colLetter = colIndexToLetter(c);
     const colObj = worksheet.getColumn(c);
-    let width = 95;
-    if (c === 1 && (!colObj.width || colObj.width <= 6)) {
-      width = 40;
-    } else if (colObj && colObj.width) {
-      width = Math.round(colObj.width * 7.5 + 16);
-      width = Math.max(45, Math.min(width, 320));
-    }
-    columns.push({ colLetter, width });
+    
+    // Read raw column width from Excel
+    const rawWidth = (colObj && typeof colObj.width === 'number' && colObj.width > 0)
+      ? colObj.width
+      : defaultColWidth;
+
+    // Excel standard character width to pixels: Math.round(chars * 8.0 + 5)
+    // Allows faithful thin margins (e.g. 2 chars = 21px) and wide cells (e.g. 50 chars = 405px)
+    const pixelWidth = Math.max(18, Math.round(rawWidth * 8.0 + 5));
+    columns.push({ colLetter, width: pixelWidth });
   }
 
   // 6. Build rows & cell matrices
+  const defaultRowHeightPt = (worksheet.properties && typeof (worksheet.properties as any).defaultRowHeight === 'number' && (worksheet.properties as any).defaultRowHeight > 0)
+    ? (worksheet.properties as any).defaultRowHeight
+    : 15;
+
   const rows: { rowNumber: number; height?: number; cells: RenderedCellData[] }[] = [];
   let cellCount = 0;
 
   for (let r = 1; r <= maxRowIndex; r++) {
     const rowCells: RenderedCellData[] = [];
     const excelRow = worksheet.getRow(r);
-    const rowHeight = excelRow.height ? Math.round(excelRow.height * 1.33) : undefined;
+    const rawHeightPt = (excelRow && typeof excelRow.height === 'number' && excelRow.height > 0)
+      ? excelRow.height
+      : defaultRowHeightPt;
+    // 1 pt = 1.3333 px at 96 DPI
+    const rowHeight = Math.max(18, Math.round(rawHeightPt * 1.333));
 
     for (let c = 1; c <= maxColIndex; c++) {
       const colLetter = colIndexToLetter(c);
@@ -856,15 +899,21 @@ export async function renderSpecificationExcelGrid(
 
       const isBold = Boolean(cell.font && cell.font.bold);
       const fontSize = cell.font && cell.font.size ? cell.font.size : 10;
+      const fontFamily = cell.font && cell.font.name ? cell.font.name : undefined;
       const align = (cell.alignment && cell.alignment.horizontal as any) || (typeof cell.value === 'number' ? 'right' : 'left');
       const verticalAlign = (cell.alignment && cell.alignment.vertical as any) || 'middle';
+      const wrapText = Boolean(cell.alignment && cell.alignment.wrapText);
       
       const border = cell.border;
-      const borderTop = Boolean(border?.top && (border.top.style || typeof border.top === 'string'));
-      const borderBottom = Boolean(border?.bottom && (border.bottom.style || typeof border.bottom === 'string'));
-      const borderLeft = Boolean(border?.left && (border.left.style || typeof border.left === 'string'));
-      const borderRight = Boolean(border?.right && (border.right.style || typeof border.right === 'string'));
-      const hasBorder = Boolean(borderTop || borderBottom || borderLeft || borderRight);
+      const borderTopStyle = formatExcelBorder(border?.top);
+      const borderBottomStyle = formatExcelBorder(border?.bottom);
+      const borderLeftStyle = formatExcelBorder(border?.left);
+      const borderRightStyle = formatExcelBorder(border?.right);
+      const hasBorder = Boolean(borderTopStyle || borderBottomStyle || borderLeftStyle || borderRightStyle);
+      const borderTop = Boolean(borderTopStyle);
+      const borderBottom = Boolean(borderBottomStyle);
+      const borderLeft = Boolean(borderLeftStyle);
+      const borderRight = Boolean(borderRightStyle);
 
       // Field mapping tag
       const mapped = fieldMappingMap[addr];
@@ -876,10 +925,16 @@ export async function renderSpecificationExcelGrid(
         value: displayVal,
         isBold,
         fontSize,
+        fontFamily,
         fontColor,
         align,
         verticalAlign,
         bgColor,
+        wrapText,
+        borderTopStyle,
+        borderBottomStyle,
+        borderLeftStyle,
+        borderRightStyle,
         hasBorder,
         borderTop,
         borderBottom,

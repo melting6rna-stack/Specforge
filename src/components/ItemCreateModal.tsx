@@ -13,7 +13,7 @@ import {
   FileText
 } from 'lucide-react';
 import { EquipmentItem, Category, EquipmentSpecParam, EquipmentClassification } from '../types';
-import { CLASSIFICATION_OPTIONS, formatTagNo, getClassificationAndSeq } from '../utils/tagNumbering';
+import { CLASSIFICATION_OPTIONS, formatTagNo, getClassificationAndSeq, getClassificationLabel } from '../utils/tagNumbering';
 
 interface ItemCreateModalProps {
   isOpen: boolean;
@@ -183,7 +183,7 @@ export const ItemCreateModal: React.FC<ItemCreateModalProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                機器区分（03: 購入品 / 04: 製作品）と自動連番によるナンバリングに対応
+                機器区分（03: 購入品 / 04: 製作品 / 08: 設計込）と自動連番によるナンバリングに対応
               </p>
             </div>
           </div>
@@ -216,11 +216,11 @@ export const ItemCreateModal: React.FC<ItemCreateModalProps> = ({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-              {/* 機器区分 (03 or 04) */}
+              {/* 機器区分 (03, 04, 08) */}
               <div>
                 <label className="block font-semibold text-slate-700 mb-1 flex items-center justify-between">
                   <span>機器区分 *</span>
-                  <span className="text-[10px] text-indigo-600 font-mono">03 / 04</span>
+                  <span className="text-[10px] text-indigo-600 font-mono">03 / 04 / 08</span>
                 </label>
                 <select
                   value={classification}
@@ -296,7 +296,7 @@ export const ItemCreateModal: React.FC<ItemCreateModalProps> = ({
                     {computedTagNo}
                   </span>
                   <span className="text-[11px] text-slate-600">
-                    ({classification === '03' ? '購入品' : '製作品'} No.{seq})
+                    ({getClassificationLabel(classification)} No.{seq})
                   </span>
                 </div>
                 <span className="text-[10px] text-indigo-600 hidden sm:inline">

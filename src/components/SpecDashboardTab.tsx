@@ -1235,11 +1235,11 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                                       verticalAlign: cell.verticalAlign || 'middle',
                                       fontWeight: cell.isBold ? 700 : 400,
                                       fontSize: cell.fontSize ? `${Math.max(8.5, Math.min(cell.fontSize, 15))}px` : '9.5px',
-                                      borderTop: cell.borderTop ? '1px solid #475569' : undefined,
-                                      borderBottom: cell.borderBottom ? '1px solid #475569' : undefined,
-                                      borderLeft: cell.borderLeft ? '1px solid #475569' : undefined,
-                                      borderRight: cell.borderRight ? '1px solid #475569' : undefined,
-                                      border: (cell.hasBorder && !cell.borderTop && !cell.borderBottom && !cell.borderLeft && !cell.borderRight) ? '1px solid #475569' : undefined,
+                                      borderTop: cell.borderTopStyle || (cell.borderTop ? '1px solid #475569' : undefined),
+                                      borderBottom: cell.borderBottomStyle || (cell.borderBottom ? '1px solid #475569' : undefined),
+                                      borderLeft: cell.borderLeftStyle || (cell.borderLeft ? '1px solid #475569' : undefined),
+                                      borderRight: cell.borderRightStyle || (cell.borderRight ? '1px solid #475569' : undefined),
+                                      border: (!cell.borderTopStyle && !cell.borderBottomStyle && !cell.borderLeftStyle && !cell.borderRightStyle && cell.hasBorder) ? '1px solid #475569' : undefined,
                                       padding: '3px 5px',
                                       wordBreak: 'break-word',
                                       lineHeight: 1.25,
@@ -1286,14 +1286,13 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
 
           {/* VIEW MODE 2: EXCEL ORIGINAL LIVE GRID */}
           {previewMode === 'excel' && (
-            <div className="overflow-x-auto pb-4">
-              <div 
-                style={{ transform: previewZoom !== 100 ? `scale(${previewZoom / 100})` : undefined, transformOrigin: 'top left' }}
-                className="bg-white border border-slate-300 shadow-md rounded-lg overflow-hidden min-w-[760px] transition-transform select-none"
-              >
-                {/* Sheet Tabs Bar */}
-                <div className="bg-slate-100 border-b border-slate-300 px-2 py-1 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-1 overflow-x-auto">
+            <div className="space-y-2 pb-4">
+              <div className="bg-white border border-slate-300 shadow-md rounded-xl overflow-hidden transition-all select-none">
+                
+                {/* Sheet Tabs Bar & In-Frame Zoom Toolbar */}
+                <div className="bg-slate-100 border-b border-slate-300 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2.5 text-xs">
+                  {/* Sheet Tabs */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto">
                     {excelGridData?.availableSheets && excelGridData.availableSheets.length > 0 ? (
                       excelGridData.availableSheets.map(s => {
                         const isActive = (selectedSheetOverride || excelGridData.sheetName) === s;
@@ -1302,7 +1301,7 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                             key={s}
                             type="button"
                             onClick={() => setSelectedSheetOverride(s)}
-                            className={`px-3 py-1 font-bold text-xs transition-colors rounded-t border-t-2 border-x cursor-pointer ${
+                            className={`px-3 py-1.5 font-bold text-xs transition-colors rounded-t-lg border-t-2 border-x cursor-pointer ${
                               isActive
                                 ? 'bg-white border-t-emerald-600 border-x-slate-300 text-slate-900 shadow-2xs'
                                 : 'bg-slate-200/70 border-transparent text-slate-600 hover:bg-slate-200 hover:text-slate-900'
@@ -1313,101 +1312,212 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                         );
                       })
                     ) : (
-                      <span className="bg-white border-t-2 border-emerald-600 border-x border-slate-300 px-3 py-1 font-bold text-slate-900 shadow-2xs">
+                      <span className="bg-white border-t-2 border-emerald-600 border-x border-slate-300 px-3 py-1.5 font-bold text-slate-900 shadow-2xs rounded-t-lg">
                         {excelGridData?.sheetName || '仕様書'}
                       </span>
                     )}
                   </div>
-                  <div className="text-[11px] text-slate-500 font-mono pr-2">
-                    ExcelJS In-Memory Grid Canvas
+
+                  {/* Excel Frame In-Canvas Zoom Controls */}
+                  <div className="flex items-center gap-2 shrink-0 ml-auto">
+                    {/* Quick Preset Buttons */}
+                    <div className="hidden sm:flex items-center gap-1 text-[10px]">
+                      {[75, 100, 125].map(preset => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setPreviewZoom(preset)}
+                          className={`px-2 py-0.5 rounded font-mono font-bold cursor-pointer transition-colors ${
+                            previewZoom === preset 
+                              ? 'bg-slate-800 text-white shadow-2xs' 
+                              : 'bg-white text-slate-600 hover:bg-slate-200 border border-slate-300'
+                          }`}
+                        >
+                          {preset}%
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Stepper with Zoom In / Out */}
+                    <div className="flex items-center bg-white border border-slate-300 rounded-lg p-0.5 shadow-2xs">
+                      <button
+                        type="button"
+                        onClick={() => setPreviewZoom(z => Math.max(40, z - 10))}
+                        className="p-1 hover:bg-slate-100 rounded text-slate-600 hover:text-slate-900 cursor-pointer transition-colors"
+                        title="Excelシートを縮小 (-10%)"
+                      >
+                        <ZoomOut className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="px-2 font-mono text-[11px] font-bold text-slate-800 select-none min-w-[44px] text-center">
+                        {previewZoom}%
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewZoom(z => Math.min(200, z + 10))}
+                        className="p-1 hover:bg-slate-100 rounded text-slate-600 hover:text-slate-900 cursor-pointer transition-colors"
+                        title="Excelシートを拡大 (+10%)"
+                      >
+                        <ZoomIn className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setPreviewZoom(100)}
+                      className="px-2 py-1 text-[10px] font-medium text-slate-600 hover:text-slate-900 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors cursor-pointer"
+                      title="倍率を100%にリセット"
+                    >
+                      リセット
+                    </button>
                   </div>
                 </div>
 
-                {/* Spreadsheet Table with Column Letters (A, B, C...) & Row Numbers (1, 2, 3...) */}
-                <div className="overflow-x-auto max-h-[720px] overflow-y-auto">
-                  <table className="border-collapse text-xs font-sans w-full bg-white">
-                    <thead className="bg-slate-200/90 text-slate-700 font-mono font-semibold border-b border-slate-300 sticky top-0 z-20">
-                      <tr>
-                        <th className="w-10 p-1 text-center border-r border-slate-300 bg-slate-300/80 text-[10px] sticky left-0 z-30">#</th>
+                {/* Spreadsheet Scroll Canvas with Wheel Zoom and Fixed Pixel Dimensions */}
+                <div 
+                  className="overflow-auto max-h-[720px] bg-slate-200/60 p-3 sm:p-5"
+                  onWheel={(e) => {
+                    if (e.ctrlKey) {
+                      e.preventDefault();
+                      if (e.deltaY < 0) {
+                        setPreviewZoom(z => Math.min(200, z + 10));
+                      } else {
+                        setPreviewZoom(z => Math.max(40, z - 10));
+                      }
+                    }
+                  }}
+                  title="Ctrl + マウスホイールで拡大縮小"
+                >
+                  <div 
+                    style={{
+                      zoom: previewZoom !== 100 ? previewZoom / 100 : undefined,
+                      transform: (typeof (document?.body?.style as any)?.zoom === 'undefined' && previewZoom !== 100)
+                        ? `scale(${previewZoom / 100})` 
+                        : undefined,
+                      transformOrigin: 'top left',
+                      width: `${totalColWidth + 42}px`,
+                      minWidth: `${totalColWidth + 42}px`,
+                      margin: '0 auto'
+                    }}
+                    className="bg-white shadow-xl rounded-xs border border-slate-300"
+                  >
+                    <table 
+                      className="border-collapse text-slate-900 bg-white"
+                      style={{
+                        width: `${totalColWidth + 42}px`,
+                        minWidth: `${totalColWidth + 42}px`,
+                        tableLayout: 'fixed'
+                      }}
+                    >
+                      <colgroup>
+                        <col style={{ width: '42px', minWidth: '42px' }} />
                         {excelGridData?.columns.map(col => (
-                          <th 
-                            key={col.colLetter}
-                            style={{ width: `${col.width}px` }}
-                            className="p-1 text-center border-r border-slate-300 text-[11px] bg-slate-200"
-                          >
-                            {col.colLetter}
-                          </th>
+                          <col 
+                            key={col.colLetter} 
+                            style={{ width: `${col.width}px`, minWidth: `${col.width}px` }} 
+                          />
                         ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {excelGridData?.rows.map(row => (
-                        <tr key={row.rowNumber} className="border-b border-slate-200">
-                          <td className="bg-slate-100 text-slate-500 font-mono text-[10px] text-center p-1 border-r border-slate-300 sticky left-0 z-10 select-none">
-                            {row.rowNumber}
-                          </td>
-                          {row.cells.map(cell => {
-                            if (cell.isMergedChild) {
-                              return null;
-                            }
-                            const isSelected = cell.address === selectedCellAddress;
-                            const isMapped = Boolean(cell.isMapped || cell.mappedFieldId);
-
-                            return (
-                              <td
-                                key={cell.address}
-                                colSpan={cell.colSpan || 1}
-                                rowSpan={cell.rowSpan || 1}
-                                onClick={() => {
-                                  setSelectedCellAddress(cell.address);
-                                  if (cell.mappedFieldId) {
-                                    setFocusedFieldId(cell.mappedFieldId);
-                                  }
-                                }}
-                                title={`セル ${cell.address}${cell.mappedFieldLabel ? ` (連動: ${cell.mappedFieldLabel})` : ''}: ${cell.value}`}
-                                style={{
-                                  backgroundColor: isSelected ? '#EEF2FF' : (cell.bgColor || undefined),
-                                  textAlign: cell.align || 'left',
-                                  color: cell.fontColor || undefined,
-                                }}
-                                className={`p-1.5 border-r border-slate-200 text-xs transition-colors cursor-cell select-text ${
-                                  cell.isBold ? 'font-bold' : ''
-                                } ${
-                                  isSelected ? 'ring-2 ring-indigo-600 bg-indigo-50/70 z-10 font-bold shadow-xs' : ''
-                                } ${
-                                  isMapped && !isSelected ? 'hover:bg-indigo-50/40' : 'hover:bg-slate-50'
-                                }`}
-                              >
-                                <div className="flex items-center justify-between gap-1 overflow-hidden">
-                                  <span className="truncate">{cell.value || ''}</span>
-                                  {isMapped && (
-                                    <span 
-                                      className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0 opacity-70" 
-                                      title={`マッピング連動: ${cell.mappedFieldLabel || ''}`} 
-                                    />
-                                  )}
-                                </div>
-                              </td>
-                            );
-                          })}
+                      </colgroup>
+                      <thead className="bg-slate-200 text-slate-700 font-mono text-[11px] font-semibold sticky top-0 z-20 shadow-2xs">
+                        <tr style={{ height: '24px' }}>
+                          <th className="w-[42px] p-0 text-center border-r border-b border-slate-300 bg-slate-300/90 text-[10px] sticky left-0 z-30 select-none">#</th>
+                          {excelGridData?.columns.map(col => (
+                            <th 
+                              key={col.colLetter}
+                              style={{ width: `${col.width}px` }}
+                              className="p-1 text-center border-r border-b border-slate-300 text-[11px] bg-slate-200"
+                            >
+                              {col.colLetter}
+                            </th>
+                          ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {excelGridData?.rows.map(row => (
+                          <tr 
+                            key={row.rowNumber} 
+                            style={{ height: row.height ? `${row.height}px` : '20px' }}
+                          >
+                            <td className="bg-slate-100/95 text-slate-500 font-mono text-[10px] text-center p-0 border-r border-b border-slate-300 sticky left-0 z-10 select-none font-semibold">
+                              {row.rowNumber}
+                            </td>
+                            {row.cells.map(cell => {
+                              if (cell.isMergedChild) {
+                                return null;
+                              }
+                              const isSelected = cell.address === selectedCellAddress;
+                              const isMapped = Boolean(cell.isMapped || cell.mappedFieldId);
+
+                              return (
+                                <td
+                                  key={cell.address}
+                                  colSpan={cell.colSpan || 1}
+                                  rowSpan={cell.rowSpan || 1}
+                                  onClick={() => {
+                                    setSelectedCellAddress(cell.address);
+                                    if (cell.mappedFieldId) {
+                                      setFocusedFieldId(cell.mappedFieldId);
+                                    }
+                                  }}
+                                  title={`セル ${cell.address}${cell.mappedFieldLabel ? ` (連動: ${cell.mappedFieldLabel})` : ''}: ${cell.value}`}
+                                  style={{
+                                    backgroundColor: isSelected ? '#EEF2FF' : (cell.bgColor || undefined),
+                                    textAlign: cell.align || 'left',
+                                    verticalAlign: cell.verticalAlign || 'middle',
+                                    color: cell.fontColor || '#0f172a',
+                                    fontWeight: cell.isBold ? 700 : 400,
+                                    fontSize: cell.fontSize ? `${Math.max(8.5, Math.min(cell.fontSize, 16))}px` : '10px',
+                                    fontFamily: cell.fontFamily ? `"${cell.fontFamily}", "Meiryo", sans-serif` : undefined,
+                                    borderTop: cell.borderTopStyle || (cell.borderTop ? '1px solid #475569' : '1px solid #e2e8f0'),
+                                    borderBottom: cell.borderBottomStyle || (cell.borderBottom ? '1px solid #475569' : '1px solid #e2e8f0'),
+                                    borderLeft: cell.borderLeftStyle || (cell.borderLeft ? '1px solid #475569' : '1px solid #e2e8f0'),
+                                    borderRight: cell.borderRightStyle || (cell.borderRight ? '1px solid #475569' : '1px solid #e2e8f0'),
+                                    padding: '2px 4px',
+                                    wordBreak: 'break-word',
+                                    lineHeight: 1.25,
+                                    whiteSpace: 'pre-wrap',
+                                    overflow: 'hidden'
+                                  }}
+                                  className={`transition-colors cursor-cell select-text ${
+                                    isSelected ? 'ring-2 ring-indigo-600 bg-indigo-50/70 z-10 font-bold shadow-xs' : ''
+                                  } ${
+                                    isMapped && !isSelected ? 'hover:bg-indigo-50/40' : 'hover:bg-slate-50'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between gap-1 w-full h-full">
+                                    <span className="w-full">{cell.value || ''}</span>
+                                    {isMapped && (
+                                      <span 
+                                        className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0 opacity-70 ml-0.5" 
+                                        title={`マッピング連動: ${cell.mappedFieldLabel || ''}`} 
+                                      />
+                                    )}
+                                  </div>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
 
                 {/* Status footer for the Excel Sheet */}
-                <div className="p-2.5 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500 flex items-center justify-between">
+                <div className="p-2.5 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500 flex flex-col sm:flex-row items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                    <span>セルをクリックすると上の数式バーおよび左の項目と連動して編集できます。</span>
+                    <span>セルをクリックすると上の数式バーおよび左の項目と連動して編集できます。（Ctrl + マウスホイールで拡大縮小可能）</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-indigo-700 font-semibold">
-                      選択セル: {selectedCellAddress}
+                  <div className="flex items-center gap-2 font-mono">
+                    <span className="text-indigo-700 font-semibold">
+                      選択セル: {selectedCellAddress || '-'}
                     </span>
                     <span className="text-slate-300">|</span>
-                    <span className="font-mono text-emerald-700 font-semibold">1-Click .xlsx Export Ready</span>
+                    <span className="text-slate-600 font-semibold">
+                      倍率: {previewZoom}%
+                    </span>
+                    <span className="text-slate-300">|</span>
+                    <span className="text-emerald-700 font-semibold">1-Click .xlsx Export Ready</span>
                   </div>
                 </div>
               </div>

@@ -77,5 +77,29 @@ export const INITIAL_ITEMS: EquipmentItem[] = [
     material: 'SUS304',
     createdAt: '2026-03-02',
     updatedAt: '2026-03-02'
+  },
+  {
+    id: 'eq-03',
+    projectId: 'prj-main',
+    tagNo: '08-001',
+    classification: '08',
+    equipmentType: 'TK',
+    name: '特注撹拌受槽タンク（設計込）',
+    quantity: 1,
+    unit: '基',
+    deliveryDate: '2026-07-30',
+    isIssued: false,
+    categoryId: 'cat-etc',
+    deliveryLocation: '第1化学工場受入ヤード',
+    notes: '詳細設計・強度計算書・製作図面作成一式含む',
+    specs: [
+      { id: 'sp-3-1', name: '容量', value: '3.0', unit: 'm³' },
+      { id: 'sp-3-2', name: '材質', value: 'SUS316L', unit: '' },
+      { id: 'sp-3-3', name: '設計圧力', value: '0.2', unit: 'MPa' }
+    ],
+    diameter: '1500φ×2000H',
+    material: 'SUS316L',
+    createdAt: '2026-03-05',
+    updatedAt: '2026-03-05'
   }
 ];

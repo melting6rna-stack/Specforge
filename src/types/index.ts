@@ -24,13 +24,13 @@ export interface EquipmentSpecParam {
   unit: string; // 単位 (例: A, kW, m³/h, m, MPa, V等)
 }
 
-export type EquipmentClassification = '03' | '04'; // '03': 購入品, '04': 製作品
+export type EquipmentClassification = '03' | '04' | '08'; // '03': 購入品, '04': 製作品, '08': 設計込
 
 export interface EquipmentItem {
   id: string;
   projectId: string;
-  tagNo: string; // 機器番号・タグ (例: 03-001, 04-001)
-  classification?: EquipmentClassification; // 機器区分 ('03': 購入品, '04': 製作品)
+  tagNo: string; // 機器番号・タグ (例: 03-001, 04-001, 08-001)
+  classification?: EquipmentClassification; // 機器区分 ('03': 購入品, '04': 製作品, '08': 設計込)
   name: string; // 機器名 (必須)
   quantity: number; // 数量 (必須)
   unit: string; // 数量の単位 (台, 個, 基, 本)

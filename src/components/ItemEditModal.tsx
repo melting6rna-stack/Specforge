@@ -13,7 +13,7 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { EquipmentItem, Category, EquipmentSpecParam, ChangeLog, EquipmentClassification } from '../types';
-import { CLASSIFICATION_OPTIONS, formatTagNo, getClassificationAndSeq } from '../utils/tagNumbering';
+import { CLASSIFICATION_OPTIONS, formatTagNo, getClassificationAndSeq, getClassificationLabel } from '../utils/tagNumbering';
 
 interface ItemEditModalProps {
   item: EquipmentItem;
@@ -132,7 +132,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
     // Generate diff log automatically
     const diffList: string[] = [];
     if (computedTagNo !== (item.tagNo || '')) {
-      diffList.push(`機器番号: ${item.tagNo || '-'} → ${computedTagNo} (${classification === '03' ? '購入品' : '製作品'} No.${seq})`);
+      diffList.push(`機器番号: ${item.tagNo || '-'} → ${computedTagNo} (${getClassificationLabel(classification)} No.${seq})`);
     }
     if (equipmentType.trim().toUpperCase() !== (item.equipmentType || '')) diffList.push(`機器種別: ${item.equipmentType || '-'} → ${equipmentType.trim().toUpperCase()}`);
     if (name.trim() !== item.name) diffList.push(`機器名: ${item.name} → ${name.trim()}`);
@@ -230,7 +230,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
             <div>
               <label className="block font-semibold text-slate-700 mb-1 flex items-center justify-between">
                 <span>機器区分 *</span>
-                <span className="text-[10px] text-indigo-600 font-mono">03 / 04</span>
+                <span className="text-[10px] text-indigo-600 font-mono">03 / 04 / 08</span>
               </label>
               <select
                 value={classification}
@@ -306,7 +306,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                   {computedTagNo}
                 </span>
                 <span className="text-[11px] text-slate-600">
-                  ({classification === '03' ? '購入品' : '製作品'} No.{seq})
+                  ({getClassificationLabel(classification)} No.{seq})
                 </span>
               </div>
               <span className="text-[10px] text-indigo-700 font-medium">

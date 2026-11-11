@@ -86,8 +86,8 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
   const [batchEquipmentTypeValue, setBatchEquipmentTypeValue] = useState<string>('');
   const [isBatchCategoryMenuOpen, setIsBatchCategoryMenuOpen] = useState<boolean>(false);
 
-  // Classification filter: 'all', '03' (購入品), '04' (製作品)
-  const [classificationFilter, setClassificationFilter] = useState<'all' | '03' | '04'>('all');
+  // Classification filter: 'all', '03' (購入品), '04' (製作品), '08' (設計込)
+  const [classificationFilter, setClassificationFilter] = useState<'all' | '03' | '04' | '08'>('all');
 
   // Sorting state: 'manual' (D&D order), 'tagNo', 'deliveryDate'
   const [sortField, setSortField] = useState<'manual' | 'tagNo' | 'deliveryDate'>('manual');
@@ -108,8 +108,10 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
     if (classificationFilter !== 'all') {
       const is03 = item.classification === '03' || item.tagNo?.startsWith('03-');
       const is04 = item.classification === '04' || item.tagNo?.startsWith('04-');
+      const is08 = item.classification === '08' || item.tagNo?.startsWith('08-');
       if (classificationFilter === '03' && !is03) return false;
       if (classificationFilter === '04' && !is04) return false;
+      if (classificationFilter === '08' && !is08) return false;
     }
     if (searchTerm) {
       const q = searchTerm.toLowerCase();
@@ -584,6 +586,23 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
               </div>
               <span className={`text-[11px] font-mono tabular-nums ${classificationFilter === '04' ? 'text-amber-100' : 'text-slate-400'}`}>
                 {projectItems.filter(it => it.classification === '04' || it.tagNo?.startsWith('04-')).length}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setClassificationFilter('08')}
+              className={`w-full text-left p-2 rounded-lg text-xs font-medium flex items-center justify-between transition-colors cursor-pointer ${
+                classificationFilter === '08'
+                  ? 'bg-purple-600 text-white shadow-2xs'
+                  : 'text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono font-bold text-[11px] px-1 py-0.2 rounded bg-purple-100 text-purple-900">08</span>
+                <span>設計込</span>
+              </div>
+              <span className={`text-[11px] font-mono tabular-nums ${classificationFilter === '08' ? 'text-purple-100' : 'text-slate-400'}`}>
+                {projectItems.filter(it => it.classification === '08' || it.tagNo?.startsWith('08-')).length}
               </span>
             </button>
           </div>
