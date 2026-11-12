@@ -210,7 +210,7 @@ export const ItemCreateModal: React.FC<ItemCreateModalProps> = ({
     }
 
     const newItem: EquipmentItem = {
-      id: `eq-${Date.now()}`,
+      id: computedTagNo,
       projectId,
       tagNo: computedTagNo,
       classification,

@@ -132,8 +132,8 @@
       "properties": {
         "id": {
           "type": "string",
-          "pattern": "^EQ-[0-9]{3,}$",
-          "description": "機器タグ番号 (例: EQ-001, EQ-012)"
+          "pattern": "^[0-9]{2}-[0-9]{3,}$",
+          "description": "機器タグ番号 (例: 03-001, 04-012, 08-001)"
         },
         "name": {
           "type": "string",

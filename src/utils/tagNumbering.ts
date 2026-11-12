@@ -87,25 +87,37 @@ export function resequenceProjectItems(projectItems: EquipmentItem[]): Equipment
   }
 
   // Renumber items03 sequentially from 1
-  const resequenced03 = items03.map((it, idx) => ({
-    ...it,
-    classification: '03' as EquipmentClassification,
-    tagNo: formatTagNo('03', idx + 1)
-  }));
+  const resequenced03 = items03.map((it, idx) => {
+    const newTag = formatTagNo('03', idx + 1);
+    return {
+      ...it,
+      id: newTag,
+      classification: '03' as EquipmentClassification,
+      tagNo: newTag
+    };
+  });
 
   // Renumber items04 sequentially from 1
-  const resequenced04 = items04.map((it, idx) => ({
-    ...it,
-    classification: '04' as EquipmentClassification,
-    tagNo: formatTagNo('04', idx + 1)
-  }));
+  const resequenced04 = items04.map((it, idx) => {
+    const newTag = formatTagNo('04', idx + 1);
+    return {
+      ...it,
+      id: newTag,
+      classification: '04' as EquipmentClassification,
+      tagNo: newTag
+    };
+  });
 
   // Renumber items08 sequentially from 1
-  const resequenced08 = items08.map((it, idx) => ({
-    ...it,
-    classification: '08' as EquipmentClassification,
-    tagNo: formatTagNo('08', idx + 1)
-  }));
+  const resequenced08 = items08.map((it, idx) => {
+    const newTag = formatTagNo('08', idx + 1);
+    return {
+      ...it,
+      id: newTag,
+      classification: '08' as EquipmentClassification,
+      tagNo: newTag
+    };
+  });
 
   // Recombine preserving the relative order of items in original list
   let idx03 = 0;
@@ -132,10 +144,12 @@ export function placeItemWithResequence(
   allProjectItems: EquipmentItem[],
   targetItem: EquipmentItem,
   targetClassification: EquipmentClassification,
-  targetSeq: number
+  targetSeq: number,
+  originalId?: string
 ): EquipmentItem[] {
-  // Separate other items in project
-  const otherItems = allProjectItems.filter(it => it.id !== targetItem.id);
+  // Separate other items in project, matching by originalId or targetItem.id
+  const idToRemove = originalId || targetItem.id;
+  const otherItems = allProjectItems.filter(it => it.id !== idToRemove && it.id !== targetItem.id);
 
   // Group existing others into 03, 04, and 08
   const others03: EquipmentItem[] = [];
@@ -178,26 +192,38 @@ export function placeItemWithResequence(
     new03 = [...others03.slice(0, insertIdx), updatedTarget, ...others03.slice(insertIdx)];
   }
 
-  // Renumber new03: 03-001, 03-002, 03-003...
-  const final03 = new03.map((it, idx) => ({
-    ...it,
-    classification: '03' as EquipmentClassification,
-    tagNo: formatTagNo('03', idx + 1)
-  }));
+  // Renumber new03: 03-001, 03-002, 03-003... setting both id and tagNo
+  const final03 = new03.map((it, idx) => {
+    const newTag = formatTagNo('03', idx + 1);
+    return {
+      ...it,
+      id: newTag,
+      classification: '03' as EquipmentClassification,
+      tagNo: newTag
+    };
+  });
 
-  // Renumber new04: 04-001, 04-002, 04-003...
-  const final04 = new04.map((it, idx) => ({
-    ...it,
-    classification: '04' as EquipmentClassification,
-    tagNo: formatTagNo('04', idx + 1)
-  }));
+  // Renumber new04: 04-001, 04-002, 04-003... setting both id and tagNo
+  const final04 = new04.map((it, idx) => {
+    const newTag = formatTagNo('04', idx + 1);
+    return {
+      ...it,
+      id: newTag,
+      classification: '04' as EquipmentClassification,
+      tagNo: newTag
+    };
+  });
 
-  // Renumber new08: 08-001, 08-002, 08-003...
-  const final08 = new08.map((it, idx) => ({
-    ...it,
-    classification: '08' as EquipmentClassification,
-    tagNo: formatTagNo('08', idx + 1)
-  }));
+  // Renumber new08: 08-001, 08-002, 08-003... setting both id and tagNo
+  const final08 = new08.map((it, idx) => {
+    const newTag = formatTagNo('08', idx + 1);
+    return {
+      ...it,
+      id: newTag,
+      classification: '08' as EquipmentClassification,
+      tagNo: newTag
+    };
+  });
 
   return [...final03, ...final04, ...final08];
 }

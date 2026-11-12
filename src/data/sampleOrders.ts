@@ -28,7 +28,7 @@ export const INITIAL_CATEGORIES: Category[] = [
 
 export const INITIAL_ITEMS: EquipmentItem[] = [
   {
-    id: 'eq-01',
+    id: '03-001',
     projectId: 'prj-main',
     tagNo: '03-001',
     classification: '03',
@@ -62,7 +62,7 @@ export const INITIAL_ITEMS: EquipmentItem[] = [
     updatedAt: '2026-03-10'
   },
   {
-    id: 'eq-02',
+    id: '04-001',
     projectId: 'prj-main',
     tagNo: '04-001',
     classification: '04',
@@ -98,7 +98,7 @@ export const INITIAL_ITEMS: EquipmentItem[] = [
     updatedAt: '2026-03-02'
   },
   {
-    id: 'eq-03',
+    id: '08-001',
     projectId: 'prj-main',
     tagNo: '08-001',
     classification: '08',

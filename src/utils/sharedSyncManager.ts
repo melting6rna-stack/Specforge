@@ -1,4 +1,5 @@
 import { EquipmentItem, Category, SpecTemplate, ProjectWorkspace, EquipmentSpecParam, ChangeLog } from '../types';
+import { formatTagNo, parseTagNo } from './tagNumbering';
 
 export interface DatabasePayload {
   version: string;
@@ -349,7 +350,9 @@ function normalizeTokkiEquipmentItem(
   index: number
 ): EquipmentItem {
   const now = new Date().toISOString().slice(0, 10);
-  const tagNo = eq.id || `EQ-${String(index + 1).padStart(3, '0')}`;
+  const tagNo = eq.id || eq.tagNo || formatTagNo('03', index + 1);
+  const parsedCls = parseTagNo(tagNo);
+  const itemClassification = parsedCls.classification;
   const name = eq.name || `機器-${index + 1}`;
   
   // Quantity
@@ -412,9 +415,10 @@ function normalizeTokkiEquipmentItem(
   ].filter(Boolean);
 
   return {
-    id: eq.id || `eq-${Date.now()}-${index}`,
+    id: tagNo,
     projectId,
     tagNo,
+    classification: itemClassification,
     name,
     quantity,
     unit,
@@ -453,7 +457,8 @@ function normalizeSingleItem(
 ): EquipmentItem {
   const now = new Date().toISOString().slice(0, 10);
   const name = raw.name || raw['機器名'] || raw.equipmentName || raw.title || `機器-${index + 1}`;
-  const tagNo = raw.tagNo || raw['機器番号'] || raw['タグ番号'] || raw.tag || raw.id || `EQ-${String(index + 1).padStart(3, '0')}`;
+  const tagNo = raw.tagNo || raw['機器番号'] || raw['タグ番号'] || raw.tag || raw.id || formatTagNo('03', index + 1);
+  const parsedGenericCls = parseTagNo(tagNo);
   
   let quantity = 1;
   let unit = '台';
@@ -587,10 +592,10 @@ function normalizeSingleItem(
   }
 
   return {
-    id: raw.id || `eq-${Date.now()}-${index}`,
+    id: raw.id || String(tagNo),
     projectId,
     tagNo: String(tagNo),
-    classification: raw.classification || undefined,
+    classification: raw.classification || parsedGenericCls.classification,
     equipmentType: raw.equipmentType || raw['機器種別'] || undefined,
     name: String(name),
     quantity,
@@ -755,10 +760,11 @@ export async function writeToProjectHandle(
           }
         }
 
-        // Validate id pattern: ^EQ-[0-9]{3,}$
-        let eqId = item.tagNo;
-        if (!eqId || !/^EQ-[0-9]{3,}$/.test(eqId)) {
-          eqId = `EQ-${String(idx + 1).padStart(3, '0')}`;
+        // Validate id pattern: ^[0-9]{2}-[0-9]{3,}$ (e.g. 03-001, 04-001, 08-001)
+        let eqId = item.tagNo || item.id;
+        if (!eqId || !/^[0-9]{2}-[0-9]{3,}$/.test(eqId)) {
+          const cls = item.classification || parseTagNo(item.tagNo).classification || '03';
+          eqId = formatTagNo(cls, idx + 1);
         }
 
         // Quantity object

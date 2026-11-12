@@ -911,7 +911,8 @@ export default function App() {
   const handleSaveItem = (
     updatedItem: EquipmentItem,
     targetClassification?: EquipmentClassification,
-    targetSeq?: number
+    targetSeq?: number,
+    originalId?: string
   ) => {
     setItems(prev => {
       const currentProjectItems = prev.filter(it => it.projectId === activeProjectId);
@@ -924,7 +925,8 @@ export default function App() {
         currentProjectItems,
         updatedItem,
         cls,
-        seq
+        seq,
+        originalId
       );
 
       const nextList = [...resequencedProject, ...otherItems];

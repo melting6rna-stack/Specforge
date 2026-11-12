@@ -22,7 +22,12 @@ interface ItemEditModalProps {
   categories: Category[];
   isOpen: boolean;
   onClose: () => void;
-  onSave: (updatedItem: EquipmentItem, targetClassification: EquipmentClassification, targetSeq: number) => void;
+  onSave: (
+    updatedItem: EquipmentItem,
+    targetClassification: EquipmentClassification,
+    targetSeq: number,
+    originalId?: string
+  ) => void;
   onDelete?: (itemId: string) => void;
   existingItems?: EquipmentItem[];
 }
@@ -54,6 +59,19 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
   const initialParsed = getClassificationAndSeq(item);
   const [classification, setClassification] = useState<EquipmentClassification>(initialParsed.classification);
   const [seq, setSeq] = useState<number>(initialParsed.seq);
+
+  // When classification changes, calculate the next sequence number in the target classification group
+  const handleClassificationChange = (newCls: EquipmentClassification) => {
+    setClassification(newCls);
+    if (newCls !== initialParsed.classification) {
+      const itemsInTargetClass = existingItems.filter(it => 
+        it.id !== item.id && getClassificationAndSeq(it).classification === newCls
+      );
+      setSeq(itemsInTargetClass.length + 1);
+    } else {
+      setSeq(initialParsed.seq);
+    }
+  };
 
   const computedTagNo = formatTagNo(classification, seq);
 
@@ -284,6 +302,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
 
     const updatedItem: EquipmentItem = {
       ...item,
+      id: computedTagNo,
       tagNo: computedTagNo,
       classification,
       equipmentType: equipmentType.trim().toUpperCase() || undefined,
@@ -304,7 +323,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
       updatedAt: nowStr
     };
 
-    onSave(updatedItem, classification, seq);
+    onSave(updatedItem, classification, seq, item.id);
     onClose();
   };
 
@@ -349,7 +368,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
               </label>
               <select
                 value={classification}
-                onChange={(e) => setClassification(e.target.value as EquipmentClassification)}
+                onChange={(e) => handleClassificationChange(e.target.value as EquipmentClassification)}
                 className="w-full border border-slate-300 rounded px-2.5 py-2 text-xs font-bold text-slate-800 bg-slate-50 focus:bg-white focus:ring-1 focus:ring-slate-900 focus:outline-hidden cursor-pointer"
               >
                 {CLASSIFICATION_OPTIONS.map(opt => (
