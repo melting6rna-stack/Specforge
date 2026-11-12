@@ -35,7 +35,7 @@ interface OrderDatabaseTabProps {
   categories: Category[];
   activeProjectId: string;
   onEditItem: (item: EquipmentItem) => void;
-  onDeleteItem: (itemId: string) => void;
+  onDeleteItem: (itemId: string, skipConfirm?: boolean) => void;
   onAddNewItem: () => void;
   onOpenChangeLog: () => void;
   onAddCategory: (name: string) => void;
@@ -115,8 +115,10 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
     }
     if (searchTerm) {
       const q = searchTerm.toLowerCase();
-      // Match against tagNo, name, notes, deliveryDate, and specs
+      // Match against tagNo, name, notes, deliveryDate, specs, materials, and accessories
       const specText = (item.specs || []).map(s => `${s.name} ${s.value} ${s.unit}`).join(' ').toLowerCase();
+      const matText = (item.materials || []).map(m => `${m.part} ${m.value || ''} ${m.condition || ''} ${m.note || ''}`).join(' ').toLowerCase();
+      const accText = (item.accessories || []).map(a => `${a.name} ${a.quantity || ''} ${a.unit || ''} ${a.note || ''}`).join(' ').toLowerCase();
       const match =
         item.name.toLowerCase().includes(q) ||
         (item.tagNo && item.tagNo.toLowerCase().includes(q)) ||
@@ -125,7 +127,9 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
         (item.notes && item.notes.toLowerCase().includes(q)) ||
         (item.deliveryDate && item.deliveryDate.toLowerCase().includes(q)) ||
         (item.isIssued ? '済 発行済' : '未 未発行').includes(q) ||
-        specText.includes(q);
+        specText.includes(q) ||
+        matText.includes(q) ||
+        accText.includes(q);
       if (!match) return false;
     }
     return true;
@@ -755,6 +759,22 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                   )}
                 </div>
 
+                {/* 選択した機器を一括削除 */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm(`選択中の ${selectedItemIds.length} 件の機器を削除しますか？`)) {
+                      selectedItemIds.forEach(id => onDeleteItem(id, true));
+                      setSelectedItemIds([]);
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+                  title="選択した機器を一括削除"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-white" />
+                  <span>一括削除 ({selectedItemIds.length})</span>
+                </button>
+
                 {/* 選択解除 */}
                 <button
                   type="button"
@@ -812,13 +832,12 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                     </th>
 
                     <th className="py-2.5 px-3 whitespace-nowrap">機器名</th>
-                    <th className="py-2.5 px-3">機器仕様 (口径・出力・材質等)</th>
+                    <th className="py-2.5 px-3">機器仕様 (口径・出力等)</th>
+                    <th className="py-2.5 px-3 whitespace-nowrap">主要材質</th>
+                    <th className="py-2.5 px-3 whitespace-nowrap">付属品・予備品</th>
                     <th className="py-2.5 px-3 text-right whitespace-nowrap">数量</th>
-                    
-                    {/* 特記事項 comes BEFORE 納入時期 */}
-                    <th className="py-2.5 px-3">特記事項</th>
 
-                    {/* 納入時期 comes AFTER 特記事項 (クリックでソート切り替え) */}
+                    {/* 納入時期 (クリックでソート切り替え) */}
                     <th 
                       className="py-2.5 px-3 whitespace-nowrap cursor-pointer hover:text-indigo-600 transition-colors"
                       onClick={() => handleToggleSort('deliveryDate')}
@@ -834,18 +853,20 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                       </div>
                     </th>
 
-                    {/* 発行欄 (未か済で表記) */}
-                    <th className="py-2.5 px-3 whitespace-nowrap text-center">
+                    {/* 発行欄 (納入時期のすぐ右側・未か済で表記) */}
+                    <th className="py-2.5 px-3 whitespace-nowrap text-center w-14">
                       発行
                     </th>
 
-                    <th className="py-2.5 px-3 text-right whitespace-nowrap">操作</th>
+                    {/* 操作欄 (シンプルな編集・削除アイコン) */}
+                    <th className="py-2.5 px-3 text-right whitespace-nowrap w-16">
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {sortedItems.length === 0 ? (
                     <tr>
-                      <td colSpan={11} className="py-12 text-center text-slate-400">
+                      <td colSpan={12} className="py-12 text-center text-slate-400">
                         該当する機器データがありません。「機器を追加」または「Excel読込」から登録してください。
                       </td>
                     </tr>
@@ -948,23 +969,58 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                             )}
                           </td>
 
-                          <td className="py-3 px-3 text-right font-mono tabular-nums whitespace-nowrap">
-                            <span className="font-bold text-slate-900">{item.quantity}</span>
-                            <span className="text-slate-500 ml-1">{item.unit || '台'}</span>
+                          {/* 主要材質 (materials) */}
+                          <td className="py-2.5 px-3">
+                            {item.materials && item.materials.length > 0 ? (
+                              <div className="flex flex-col gap-1 max-w-[200px]">
+                                {item.materials.map((m, mIdx) => (
+                                  <div key={mIdx} className="text-[11px] leading-tight flex items-baseline gap-1" title={m.condition || m.note || undefined}>
+                                    <span className="text-slate-500 font-sans text-[10px] shrink-0 font-medium">{m.part}:</span>
+                                    <span className="font-mono font-semibold text-slate-800">{m.value || '-'}</span>
+                                    {m.condition && (
+                                      <span className="text-[9px] text-slate-400 font-mono">({m.condition})</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : item.material && item.material !== '-' ? (
+                              <span className="font-mono text-[11px] text-slate-800 font-semibold">{item.material}</span>
+                            ) : (
+                              <span className="text-slate-300">-</span>
+                            )}
                           </td>
 
-                          {/* 特記事項 comes BEFORE 納入時期 */}
-                          <td className="py-3 px-3 text-slate-600 text-[11px]">
-                            {item.notes ? (
-                              <div className="line-clamp-2 max-w-[240px]" title={item.notes}>
-                                {item.notes}
+                          {/* 付属品・予備品 (accessories) */}
+                          <td className="py-2.5 px-3">
+                            {item.accessories && item.accessories.length > 0 ? (
+                              <div className="flex flex-col gap-1 max-w-[200px]">
+                                {item.accessories.map((a, aIdx) => (
+                                  <div key={aIdx} className="text-[11px] leading-tight flex items-baseline gap-1" title={a.note || undefined}>
+                                    <span className="text-slate-800 font-medium">{a.name}</span>
+                                    {(a.quantity !== null && a.quantity !== undefined) && (
+                                      <span className="font-mono text-slate-500 text-[10px] shrink-0">
+                                        ×{a.quantity}{a.unit || ''}
+                                      </span>
+                                    )}
+                                    {a.note && (
+                                      <span className="text-[9px] text-slate-400 font-sans truncate max-w-[90px]" title={a.note}>
+                                        ({a.note})
+                                      </span>
+                                    )}
+                                  </div>
+                                ))}
                               </div>
                             ) : (
                               <span className="text-slate-300">-</span>
                             )}
                           </td>
 
-                          {/* 納入時期 comes AFTER 特記事項 (Clickable to edit delivery date) */}
+                          <td className="py-3 px-3 text-right font-mono tabular-nums whitespace-nowrap">
+                            <span className="font-bold text-slate-900">{item.quantity}</span>
+                            <span className="text-slate-500 ml-1">{item.unit || '台'}</span>
+                          </td>
+
+                          {/* 納入時期 (Clickable to edit delivery date) */}
                           <td
                             className="py-3 px-3 font-mono whitespace-nowrap group/deliv cursor-pointer hover:bg-indigo-50/80 transition-colors"
                             onClick={(e) => {
@@ -986,27 +1042,30 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                           </td>
 
                           {/* 発行 (表示専用: 文字列のみ・済の行は背景色30%グレー) */}
-                          <td className="py-3 px-3 text-center whitespace-nowrap select-none text-xs">
-                            <span className={item.isIssued ? 'font-bold text-slate-800' : 'text-slate-400'}>
+                          <td className="py-2.5 px-3 text-center whitespace-nowrap select-none text-xs">
+                            <span className={item.isIssued ? 'font-bold text-slate-800' : 'text-slate-400 font-medium'}>
                               {item.isIssued ? '済' : '未'}
                             </span>
                           </td>
 
-                          <td className="py-3 px-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                          {/* 以前のシンプルな編集・削除ボタン */}
+                          <td className="py-2.5 px-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-end gap-1">
                               <button
+                                type="button"
                                 onClick={() => onEditItem(item)}
-                                className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded transition-colors cursor-pointer"
+                                className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors cursor-pointer"
                                 title="編集"
                               >
-                                <Edit3 className="w-3.5 h-3.5" />
+                                <Edit3 className="w-4 h-4" />
                               </button>
                               <button
+                                type="button"
                                 onClick={() => onDeleteItem(item.id)}
-                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors cursor-pointer"
+                                className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors cursor-pointer"
                                 title="削除"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                <Trash2 className="w-4 h-4" />
                               </button>
                             </div>
                           </td>

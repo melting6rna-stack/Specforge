@@ -527,14 +527,76 @@ function normalizeSingleItem(
       .trim();
   }
 
+  // Parse materials array (materials情報)
+  let parsedMaterials: Array<{ part: string; value: string | null; condition: string | null; note: string | null }> | undefined = undefined;
+  const rawMaterials = raw.materials || raw['材質構成'] || raw['材料'] || raw['材質内訳'];
+  if (Array.isArray(rawMaterials) && rawMaterials.length > 0) {
+    parsedMaterials = rawMaterials.map((m: any) => {
+      if (typeof m === 'string') {
+        const parts = m.split(/[:：]/);
+        return {
+          part: parts[0]?.trim() || '本体',
+          value: parts[1]?.trim() || parts[0]?.trim(),
+          condition: null,
+          note: null
+        };
+      }
+      return {
+        part: String(m.part || m.name || m['部位'] || m['部品'] || '本体'),
+        value: m.value !== undefined ? (m.value !== null ? String(m.value) : null) : (m['材質'] || m.material || null),
+        condition: m.condition || m['条件'] || m['仕様'] || null,
+        note: m.note || m.remarks || m['備考'] || null
+      };
+    });
+  } else if (rawMaterials && typeof rawMaterials === 'object') {
+    parsedMaterials = Object.entries(rawMaterials).map(([part, val]) => ({
+      part,
+      value: String(val ?? ''),
+      condition: null,
+      note: null
+    }));
+  } else if (rawMat && rawMat !== '-') {
+    parsedMaterials = [{
+      part: '本体',
+      value: String(rawMat),
+      condition: null,
+      note: null
+    }];
+  }
+
+  // Parse accessories array (accessories情報)
+  let parsedAccessories: Array<{ name: string; quantity: number | null; unit: string | null; note: string | null }> | undefined = undefined;
+  const rawAccessories = raw.accessories || raw['付属品'] || raw['予備品'] || raw['付属品一覧'];
+  if (Array.isArray(rawAccessories) && rawAccessories.length > 0) {
+    parsedAccessories = rawAccessories.map((a: any) => {
+      if (typeof a === 'string') {
+        return {
+          name: a.trim(),
+          quantity: 1,
+          unit: '式',
+          note: null
+        };
+      }
+      return {
+        name: String(a.name || a.title || a['品名'] || a['名称'] || '付属品'),
+        quantity: typeof a.quantity === 'number' ? a.quantity : (a.quantity ? Number(a.quantity) || null : null),
+        unit: a.unit || a['単位'] || null,
+        note: a.note || a.remarks || a['備考'] || null
+      };
+    });
+  }
+
   return {
     id: raw.id || `eq-${Date.now()}-${index}`,
     projectId,
     tagNo: String(tagNo),
+    classification: raw.classification || undefined,
+    equipmentType: raw.equipmentType || raw['機器種別'] || undefined,
     name: String(name),
     quantity,
     unit: String(unit),
     deliveryDate: String(deliveryDate),
+    isIssued: Boolean(raw.isIssued || raw['発行']),
     categoryId,
     deliveryLocation: deliveryLocation ? String(deliveryLocation) : undefined,
     notes: notes || undefined,
@@ -542,6 +604,10 @@ function normalizeSingleItem(
     coating: coatingObj,
     diameter: rawDia ? String(rawDia) : undefined,
     material: rawMat ? String(rawMat) : undefined,
+    materials: parsedMaterials,
+    accessories: parsedAccessories,
+    action: raw.action || undefined,
+    purpose: raw.purpose || undefined,
     createdAt: raw.createdAt || now,
     updatedAt: raw.updatedAt || now,
     history: Array.isArray(raw.history) ? raw.history : undefined

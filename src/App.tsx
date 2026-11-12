@@ -934,8 +934,10 @@ export default function App() {
     setHasUnsavedChanges(true);
   };
 
-  const handleDeleteItem = (itemId: string) => {
-    if (window.confirm('この機器データを削除してもよろしいですか？（紐づけ先JSONファイルからも削除されます）')) {
+  const handleDeleteItem = (itemId: string, skipConfirm: boolean = false) => {
+    const targetItem = items.find(it => it.id === itemId);
+    const itemName = targetItem ? `${targetItem.name} (${targetItem.tagNo || '-'})` : 'この機器';
+    if (skipConfirm || window.confirm(`機器「${itemName}」を削除してもよろしいですか？`)) {
       setItems(prev => {
         const remainingProject = prev.filter(it => it.projectId === activeProjectId && it.id !== itemId);
         const otherItems = prev.filter(it => it.projectId !== activeProjectId);
@@ -945,6 +947,10 @@ export default function App() {
         return nextList;
       });
       setHasUnsavedChanges(true);
+      if (editingItem && editingItem.id === itemId) {
+        setIsEditModalOpen(false);
+        setEditingItem(null);
+      }
     }
   };
 
@@ -1205,6 +1211,7 @@ export default function App() {
             setEditingItem(null);
           }}
           onSave={handleSaveItem}
+          onDelete={handleDeleteItem}
           existingItems={items.filter(i => i.projectId === activeProjectId)}
         />
       )}

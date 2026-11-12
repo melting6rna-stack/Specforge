@@ -15,10 +15,12 @@ import {
   FileCheck2,
   Eye,
   Layers,
-  ChevronDown
+  ChevronDown,
+  Calendar,
+  Edit3
 } from 'lucide-react';
 import { EquipmentItem, SpecTemplate, Category, SpecFieldMapping, ProjectWorkspace } from '../types';
-import { downloadSpecificationExcel, renderSpecificationExcelGrid, RenderedSheetGrid } from '../utils/exceljsEngine';
+import { downloadSpecificationExcel, renderSpecificationExcelGrid, RenderedSheetGrid, RenderedCellData } from '../utils/exceljsEngine';
 import { convertElementToPdfBlob } from '../utils/pdfGenerator';
 
 interface SpecDashboardTabProps {
@@ -114,6 +116,19 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
   const [selectedSheetOverride, setSelectedSheetOverride] = useState<string>('');
   const [focusedFieldId, setFocusedFieldId] = useState<string | null>(null);
 
+  // In-preview cell overrides & custom column widths
+  const [cellOverrides, setCellOverrides] = useState<Record<string, string>>({});
+  const [customColWidths, setCustomColWidths] = useState<Record<string, number>>({});
+  const [inlineEditingCell, setInlineEditingCell] = useState<string | null>(null);
+  const [inlineEditingValue, setInlineEditingValue] = useState<string>('');
+
+  // Reset in-preview custom edits when switching templates
+  useEffect(() => {
+    setCellOverrides({});
+    setCustomColWidths({});
+    setInlineEditingCell(null);
+  }, [activeTemplate?.id]);
+
   // PDF Preview State & Offscreen A4 Reference
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState<boolean>(false);
@@ -197,9 +212,21 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
         matched[f.id] = `機器「口径」: ${item.diameter}`;
         continue;
       }
-      if (labelClean.includes('材質') && item.material && item.material !== '-') {
-        newVals[f.id] = item.material;
-        matched[f.id] = `機器「材質」: ${item.material}`;
+      if (labelClean.includes('材質')) {
+        let matVal = item.material && item.material !== '-' ? item.material : '';
+        if (!matVal && item.materials && item.materials.length > 0) {
+          matVal = item.materials.map(m => `${m.part}: ${m.value || ''}`).join(', ');
+        }
+        if (matVal) {
+          newVals[f.id] = matVal;
+          matched[f.id] = `機器「材質」: ${matVal}`;
+          continue;
+        }
+      }
+      if ((labelClean.includes('付属') || labelClean.includes('予備')) && item.accessories && item.accessories.length > 0) {
+        const accVal = item.accessories.map(a => `${a.name}${a.quantity ? ` (${a.quantity}${a.unit || ''})` : ''}`).join(', ');
+        newVals[f.id] = accVal;
+        matched[f.id] = `機器「付属品」: ${accVal}`;
         continue;
       }
       if (labelClean.includes('特記') && item.notes) {
@@ -292,11 +319,15 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
 
   // Current formula value to show in formula bar
   const currentFormulaValue = useMemo(() => {
+    if (!selectedCellAddress) return '';
+    if (cellOverrides[selectedCellAddress] !== undefined) {
+      return cellOverrides[selectedCellAddress];
+    }
     if (selectedCellMappedField) {
       return formValues[selectedCellMappedField.id] ?? selectedCell?.value ?? '';
     }
     return selectedCell?.value ?? '';
-  }, [selectedCellMappedField, formValues, selectedCell]);
+  }, [selectedCellAddress, cellOverrides, selectedCellMappedField, formValues, selectedCell]);
 
   // Total column width for proportional PDF table layout
   const totalColWidth = useMemo(() => {
@@ -304,11 +335,70 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
     return excelGridData.columns.reduce((sum, c) => sum + c.width, 0);
   }, [excelGridData]);
 
-  // Handle cell edit via formula bar
+  // Handle cell edit via formula bar (both mapped and unmapped arbitrary cells)
   const handleFormulaChange = (newVal: string) => {
+    if (!selectedCellAddress) return;
     if (selectedCellMappedField) {
       handleFieldChange(selectedCellMappedField.id, newVal);
+    } else {
+      setCellOverrides(prev => ({
+        ...prev,
+        [selectedCellAddress]: newVal
+      }));
     }
+  };
+
+  // Inline cell edit handlers (double-click on any spreadsheet cell)
+  const handleStartInlineEdit = (cell: RenderedCellData) => {
+    setInlineEditingCell(cell.address);
+    const initialVal = cellOverrides[cell.address] ?? cell.value ?? '';
+    setInlineEditingValue(initialVal);
+  };
+
+  const handleCommitInlineEdit = (address: string, val: string) => {
+    setInlineEditingCell(null);
+    const cleanAddr = address.trim().toUpperCase();
+    const mapped = activeTemplate?.fields?.find(f => f.cell && f.cell.trim().toUpperCase() === cleanAddr);
+    if (mapped) {
+      handleFieldChange(mapped.id, val);
+    } else {
+      setCellOverrides(prev => ({
+        ...prev,
+        [cleanAddr]: val
+      }));
+    }
+  };
+
+  // Interactive column width resize handlers (dragging column header divider)
+  const handleStartColResize = (colLetter: string, startWidth: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const diff = moveEvent.clientX - startX;
+      const newWidth = Math.max(24, Math.min(600, Math.round(startWidth + diff)));
+      setCustomColWidths(prev => ({
+        ...prev,
+        [colLetter]: newWidth
+      }));
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
+  const handleResetSingleColWidth = (colLetter: string) => {
+    setCustomColWidths(prev => {
+      const next = { ...prev };
+      delete next[colLetter];
+      return next;
+    });
   };
 
   // REAL-TIME IN-MEMORY EXCELJS RENDERER EFFECT (Direct redraw)
@@ -324,7 +414,15 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
       notes: formValues['f-notes'] || activeTemplate.notesTemplate
     };
 
-    renderSpecificationExcelGrid(activeTemplate, formValues, activeItems, docInfo, selectedSheetOverride || undefined)
+    renderSpecificationExcelGrid(
+      activeTemplate, 
+      formValues, 
+      activeItems, 
+      docInfo, 
+      selectedSheetOverride || undefined,
+      cellOverrides,
+      customColWidths
+    )
       .then(grid => {
         if (!isCancelled) {
           setExcelGridData(grid);
@@ -341,7 +439,7 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [activeTemplate, formValues, activeItems, fixedDocNo, renderCounter, selectedSheetOverride]);
+  }, [activeTemplate, formValues, activeItems, fixedDocNo, renderCounter, selectedSheetOverride, cellOverrides, customColWidths]);
 
   // Zoom
   const [previewZoom, setPreviewZoom] = useState<number>(100);
@@ -350,7 +448,7 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportNotice, setExportNotice] = useState<string>('');
 
-  // Export filled Excel via ExcelJS (Zero Layout Break)
+  // Export filled Excel via ExcelJS (Zero Layout Break, with cellOverrides and customColWidths)
   const handleExportExcel = async () => {
     if (!activeTemplate) return;
     setIsExporting(true);
@@ -364,7 +462,15 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
         notes: formValues['f-notes'] || activeTemplate.notesTemplate
       };
 
-      await downloadSpecificationExcel(activeTemplate, formValues, activeItems, docInfo);
+      await downloadSpecificationExcel(
+        activeTemplate, 
+        formValues, 
+        activeItems, 
+        docInfo, 
+        undefined, 
+        cellOverrides, 
+        customColWidths
+      );
       setExportNotice('Excel出力が完了しました（書式・レイアウト完全保持）');
       setTimeout(() => setExportNotice(''), 4000);
     } catch (err: any) {
@@ -408,8 +514,41 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
     }
   };
 
+  // Toggle state to pull out / expand basic individual fields
+  const [isBasicEditOpen, setIsBasicEditOpen] = useState<boolean>(false);
+
   // Group fields for clean user form presentation
-  const basicFields = useMemo(() => (activeTemplate?.fields || []).filter(f => f.group === 'basic'), [activeTemplate]);
+  // Filter out any 特記事項 or textarea from basicFields
+  const basicFields = useMemo(() => {
+    return (activeTemplate?.fields || []).filter(f => 
+      f.group === 'basic' && 
+      !f.label.includes('特記') && 
+      !f.id.includes('note') && 
+      !f.id.includes('tokki') && 
+      f.type !== 'textarea'
+    );
+  }, [activeTemplate]);
+
+  // Issue date field is surfaced directly on the card
+  const issueDateField = useMemo(() => {
+    return (activeTemplate?.fields || []).find(f => 
+      f.id === 'f-date' || 
+      (f.group === 'basic' && (f.type === 'date' || f.label.includes('発行日')))
+    );
+  }, [activeTemplate]);
+
+  // Other basic fields to be pulled out via edit button
+  const otherBasicFields = useMemo(() => {
+    return basicFields.filter(f => 
+      f.id !== 'f-docno' && 
+      f.id !== issueDateField?.id &&
+      !f.label.includes('特記') && 
+      !f.id.includes('note') && 
+      !f.id.includes('tokki') && 
+      f.type !== 'textarea'
+    );
+  }, [basicFields, issueDateField]);
+
   const checkFields = useMemo(() => (activeTemplate?.fields || []).filter(f => f.type === 'checkbox' || f.group === 'check'), [activeTemplate]);
   const specFields = useMemo(() => (activeTemplate?.fields || []).filter(f => f.type === 'select' || (f.group === 'spec' && f.type !== 'checkbox')), [activeTemplate]);
   const noteFields = useMemo(() => (activeTemplate?.fields || []).filter(f => f.type === 'textarea' || f.group === 'notes'), [activeTemplate]);
@@ -538,84 +677,144 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
               )}
             </div>
 
-            {/* Document Number with semi-fixed lock notice */}
-            <div className="space-y-1 pt-1">
+            {/* 仕様書発行日 (常に表に直接表示) */}
+            <div className="space-y-1 pt-1 border-t border-slate-100">
               <div className="flex items-center justify-between">
-                <label className="text-[11px] font-semibold text-slate-700 flex items-center gap-1">
-                  <Lock className="w-3 h-3 text-slate-400" />
-                  <span>仕様書番号</span>
-                  <span className="font-mono text-[9px] bg-slate-100 text-slate-600 px-1 py-0.5 rounded cursor-pointer hover:bg-indigo-100 hover:text-indigo-700" onClick={() => setSelectedCellAddress('C3')} title="Excelセルへジャンプ">
-                    C3
-                  </span>
+                <label className="text-[11px] font-bold text-slate-800 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>仕様書発行日</span>
+                  {issueDateField?.cell && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedCellAddress(issueDateField.cell.toUpperCase());
+                        setFocusedFieldId(issueDateField.id);
+                      }}
+                      className="font-mono text-[9px] bg-white border border-slate-200 text-slate-600 px-1.5 py-0.5 rounded hover:bg-indigo-50 hover:text-indigo-700 cursor-pointer shadow-2xs"
+                      title="Excel原本の対応セルを選択"
+                    >
+                      {issueDateField.cell}
+                    </button>
+                  )}
                 </label>
                 <span className="text-[10px] text-slate-400 font-mono">
-                  案件コード・機器番号連動
+                  ※ Excel原本の所定セルへ転記
                 </span>
               </div>
               <input
-                type="text"
-                value={formValues['f-docno'] || fixedDocNo}
+                type="date"
+                value={formValues[issueDateField?.id || 'f-date'] || new Date().toISOString().slice(0, 10)}
                 onFocus={() => {
-                  setFocusedFieldId('f-docno');
-                  setSelectedCellAddress('C3');
+                  if (issueDateField) {
+                    setFocusedFieldId(issueDateField.id);
+                    if (issueDateField.cell) setSelectedCellAddress(issueDateField.cell.toUpperCase());
+                  }
                 }}
-                onChange={(e) => handleFieldChange('f-docno', e.target.value)}
-                className="w-full text-xs font-mono font-bold bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5 text-indigo-900 focus:bg-white focus:border-indigo-500 focus:outline-hidden"
+                onChange={(e) => handleFieldChange(issueDateField?.id || 'f-date', e.target.value)}
+                className="w-full text-xs font-semibold bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-800 focus:border-indigo-500 focus:outline-hidden shadow-2xs"
               />
-              <p className="text-[10px] text-slate-400">
-                ※仕様書番号は工事コードと機器番号からほぼ固定で自動生成（詳細な採番規則は別途指示で調整可能）
-              </p>
             </div>
 
-            {/* Other basic fields */}
-            <div className="space-y-2.5 pt-1">
-              {basicFields.filter(f => f.id !== 'f-docno').map(field => {
-                const transferTag = transferredFieldsMap[field.id];
-                const isSelected = focusedFieldId === field.id || selectedCellMappedField?.id === field.id;
-                return (
-                  <div 
-                    key={field.id} 
-                    className={`space-y-1 p-2 rounded-lg transition-colors border ${
-                      isSelected ? 'bg-indigo-50/60 border-indigo-300 shadow-2xs' : 'border-transparent'
-                    }`}
-                  >
+            {/* 個別項目を手動編集する展開ボタン */}
+            <div className="pt-1 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsBasicEditOpen(prev => !prev)}
+                className="w-full py-1.5 px-3 text-[11px] font-medium text-slate-700 hover:text-indigo-700 bg-slate-50 hover:bg-indigo-50/70 border border-slate-200 hover:border-indigo-200 rounded-lg flex items-center justify-between transition-colors cursor-pointer"
+                title="通常は案件サマリーから一律反映される個別項目を手動で変更できます"
+              >
+                <div className="flex items-center gap-1.5">
+                  <Edit3 className="w-3.5 h-3.5 text-slate-500" />
+                  <span>基本情報の個別項目を手動編集</span>
+                </div>
+                <div className="flex items-center gap-1 text-[10px] text-slate-400 font-medium">
+                  <span>{isBasicEditOpen ? '閉じる' : '入力欄を展開'}</span>
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isBasicEditOpen ? 'rotate-180' : ''}`} />
+                </div>
+              </button>
+
+              {/* 引き出される個別入力欄 (通常時は非表示) */}
+              {isBasicEditOpen && (
+                <div className="space-y-3 pt-3 animate-in fade-in duration-150">
+                  {/* 仕様書番号 */}
+                  <div className="space-y-1">
                     <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5">
-                        <span>{field.label}</span>
-                        {field.cell && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedCellAddress(field.cell.toUpperCase());
-                              setFocusedFieldId(field.id);
-                            }}
-                            className="font-mono text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded hover:bg-indigo-100 hover:text-indigo-700 cursor-pointer"
-                            title="Excel原本の対応セルを選択"
-                          >
-                            {field.cell}
-                          </button>
-                        )}
-                      </label>
-                      {transferTag && (
-                        <span className="text-[9px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded font-sans truncate max-w-[170px]" title={transferTag}>
-                          ✓ {transferTag}
+                      <label className="text-[11px] font-semibold text-slate-700 flex items-center gap-1">
+                        <Lock className="w-3 h-3 text-slate-400" />
+                        <span>仕様書番号</span>
+                        <span className="font-mono text-[9px] bg-slate-100 text-slate-600 px-1 py-0.5 rounded cursor-pointer hover:bg-indigo-100 hover:text-indigo-700" onClick={() => setSelectedCellAddress('C3')} title="Excelセルへジャンプ">
+                          C3
                         </span>
-                      )}
+                      </label>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        案件コード・機器番号連動
+                      </span>
                     </div>
                     <input
-                      type={field.type === 'date' ? 'date' : 'text'}
-                      value={formValues[field.id] ?? ''}
+                      type="text"
+                      value={formValues['f-docno'] || fixedDocNo}
                       onFocus={() => {
-                        setFocusedFieldId(field.id);
-                        if (field.cell) setSelectedCellAddress(field.cell.toUpperCase());
+                        setFocusedFieldId('f-docno');
+                        setSelectedCellAddress('C3');
                       }}
-                      onChange={(e) => handleFieldChange(field.id, e.target.value)}
-                      placeholder={field.placeholder || `${field.label}を入力...`}
-                      className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-800 focus:bg-white focus:border-indigo-500 focus:outline-hidden transition-colors"
+                      onChange={(e) => handleFieldChange('f-docno', e.target.value)}
+                      className="w-full text-xs font-mono font-bold bg-white border border-slate-300 rounded px-2.5 py-1.5 text-indigo-900 focus:border-indigo-500 focus:outline-hidden"
                     />
+                    <p className="text-[10px] text-slate-400">
+                      ※仕様書番号は工事コードと機器番号からほぼ固定で自動生成（詳細な採番規則は別途指示で調整可能）
+                    </p>
                   </div>
-                );
-              })}
+
+                  {/* その他の基本項目 (特記事項は除外) */}
+                  {otherBasicFields.map(field => {
+                    const transferTag = transferredFieldsMap[field.id];
+                    const isSelected = focusedFieldId === field.id || selectedCellMappedField?.id === field.id;
+                    return (
+                      <div 
+                        key={field.id} 
+                        className={`space-y-1 p-2 rounded-lg transition-colors border ${
+                          isSelected ? 'bg-indigo-50/60 border-indigo-300 shadow-2xs' : 'border-slate-100 bg-slate-50/50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5">
+                            <span>{field.label}</span>
+                            {field.cell && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedCellAddress(field.cell.toUpperCase());
+                                  setFocusedFieldId(field.id);
+                                }}
+                                className="font-mono text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded hover:bg-indigo-100 hover:text-indigo-700 cursor-pointer"
+                                title="Excel原本の対応セルを選択"
+                              >
+                                {field.cell}
+                              </button>
+                            )}
+                          </label>
+                          {transferTag && (
+                            <span className="text-[9px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded font-sans truncate max-w-[170px]" title={transferTag}>
+                              ✓ {transferTag}
+                            </span>
+                          )}
+                        </div>
+                        <input
+                          type={field.type === 'date' ? 'date' : 'text'}
+                          value={formValues[field.id] ?? ''}
+                          onFocus={() => {
+                            setFocusedFieldId(field.id);
+                            if (field.cell) setSelectedCellAddress(field.cell.toUpperCase());
+                          }}
+                          onChange={(e) => handleFieldChange(field.id, e.target.value)}
+                          placeholder={field.placeholder || `${field.label}を入力...`}
+                          className="w-full text-xs bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-800 focus:border-indigo-500 focus:outline-hidden transition-colors"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
 
@@ -1151,7 +1350,7 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                   type="text"
                   value={currentFormulaValue}
                   onChange={(e) => handleFormulaChange(e.target.value)}
-                  placeholder={selectedCellMappedField ? `【${selectedCellMappedField.label}】の値を直接編集...` : '選択したセルの値を直接入力・確認...'}
+                  placeholder={selectedCellMappedField ? `【${selectedCellMappedField.label}】の値を直接編集...` : '選択したセルの値を直接入力・書き換え...'}
                   className="flex-1 bg-white border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-900 font-medium focus:outline-hidden focus:border-indigo-500 shadow-2xs"
                 />
                 {selectedCellMappedField ? (
@@ -1159,9 +1358,14 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                     <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
                     連動: {selectedCellMappedField.label}
                   </span>
+                ) : cellOverrides[selectedCellAddress] !== undefined ? (
+                  <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded font-medium whitespace-nowrap shrink-0 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                    直接書き換え済み
+                  </span>
                 ) : (
                   <span className="text-[10px] text-slate-400 border border-slate-200 bg-white px-2 py-0.5 rounded font-mono whitespace-nowrap shrink-0">
-                    未マッピングセル
+                    任意セル (直接入力可)
                   </span>
                 )}
               </div>
@@ -1318,8 +1522,39 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                     )}
                   </div>
 
-                  {/* Excel Frame In-Canvas Zoom Controls */}
-                  <div className="flex items-center gap-2 shrink-0 ml-auto">
+                  {/* Excel Frame In-Canvas Controls: Zoom, Column Width Reset, Overrides Badge */}
+                  <div className="flex items-center gap-2 shrink-0 ml-auto flex-wrap justify-end">
+                    {/* Badge & Reset for Cell Overrides */}
+                    {Object.keys(cellOverrides).length > 0 && (
+                      <div className="flex items-center gap-1 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md text-[10px] text-amber-800 shadow-2xs">
+                        <Edit3 className="w-3 h-3 text-amber-600" />
+                        <span className="font-semibold">セル書き換え: {Object.keys(cellOverrides).length}件</span>
+                        <button
+                          type="button"
+                          onClick={() => setCellOverrides({})}
+                          className="ml-1 text-[10px] text-amber-900 underline hover:text-amber-700 cursor-pointer font-bold"
+                          title="手動で書き換えたセルをすべてリセット"
+                        >
+                          リセット
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Badge & Reset for Column Widths */}
+                    {Object.keys(customColWidths).length > 0 && (
+                      <div className="flex items-center gap-1 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md text-[10px] text-indigo-800 shadow-2xs">
+                        <span className="font-semibold">列幅調整: {Object.keys(customColWidths).length}列</span>
+                        <button
+                          type="button"
+                          onClick={() => setCustomColWidths({})}
+                          className="ml-1 text-[10px] text-indigo-900 underline hover:text-indigo-700 cursor-pointer font-bold"
+                          title="調整した列幅を原本の既定値に戻す"
+                        >
+                          リセット
+                        </button>
+                      </div>
+                    )}
+
                     {/* Quick Preset Buttons */}
                     <div className="hidden sm:flex items-center gap-1 text-[10px]">
                       {[75, 100, 125].map(preset => (
@@ -1417,16 +1652,28 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                           />
                         ))}
                       </colgroup>
-                      <thead className="bg-slate-200 text-slate-700 font-mono text-[11px] font-semibold sticky top-0 z-20 shadow-2xs">
-                        <tr style={{ height: '24px' }}>
+                      <thead className="bg-slate-200 text-slate-700 font-mono text-[11px] font-semibold sticky top-0 z-20 shadow-2xs select-none">
+                        <tr style={{ height: '26px' }}>
                           <th className="w-[42px] p-0 text-center border-r border-b border-slate-300 bg-slate-300/90 text-[10px] sticky left-0 z-30 select-none">#</th>
                           {excelGridData?.columns.map(col => (
                             <th 
                               key={col.colLetter}
                               style={{ width: `${col.width}px` }}
-                              className="p-1 text-center border-r border-b border-slate-300 text-[11px] bg-slate-200"
+                              className="p-1 text-center border-r border-b border-slate-300 text-[11px] bg-slate-200 relative group select-none"
                             >
-                              {col.colLetter}
+                              <div className="flex items-center justify-center gap-0.5">
+                                <span>{col.colLetter}</span>
+                                {customColWidths[col.colLetter] && (
+                                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 shrink-0" title={`列幅手動調整済み (${col.width}px)`} />
+                                )}
+                              </div>
+                              {/* Drag handle to resize column width */}
+                              <div
+                                className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-500 active:bg-indigo-700 z-30 select-none opacity-0 group-hover:opacity-100 transition-opacity bg-indigo-400/40"
+                                title="ドラッグして列幅を変更（ダブルクリックで既定値に戻す）"
+                                onMouseDown={(e) => handleStartColResize(col.colLetter, col.width, e)}
+                                onDoubleClick={() => handleResetSingleColWidth(col.colLetter)}
+                              />
                             </th>
                           ))}
                         </tr>
@@ -1446,6 +1693,8 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                               }
                               const isSelected = cell.address === selectedCellAddress;
                               const isMapped = Boolean(cell.isMapped || cell.mappedFieldId);
+                              const isOverridden = cellOverrides[cell.address] !== undefined;
+                              const isInlineEditing = inlineEditingCell === cell.address;
 
                               return (
                                 <td
@@ -1458,7 +1707,8 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                                       setFocusedFieldId(cell.mappedFieldId);
                                     }
                                   }}
-                                  title={`セル ${cell.address}${cell.mappedFieldLabel ? ` (連動: ${cell.mappedFieldLabel})` : ''}: ${cell.value}`}
+                                  onDoubleClick={() => handleStartInlineEdit(cell)}
+                                  title={`セル ${cell.address}${cell.mappedFieldLabel ? ` (連動: ${cell.mappedFieldLabel})` : ''} - ダブルクリックで直接書き換え: ${cell.value}`}
                                   style={{
                                     backgroundColor: isSelected ? '#EEF2FF' : (cell.bgColor || undefined),
                                     textAlign: cell.align || 'left',
@@ -1471,7 +1721,7 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                                     borderBottom: cell.borderBottomStyle || (cell.borderBottom ? '1px solid #475569' : '1px solid #e2e8f0'),
                                     borderLeft: cell.borderLeftStyle || (cell.borderLeft ? '1px solid #475569' : '1px solid #e2e8f0'),
                                     borderRight: cell.borderRightStyle || (cell.borderRight ? '1px solid #475569' : '1px solid #e2e8f0'),
-                                    padding: '2px 4px',
+                                    padding: isInlineEditing ? '0px' : '2px 4px',
                                     wordBreak: 'break-word',
                                     lineHeight: 1.25,
                                     whiteSpace: 'pre-wrap',
@@ -1483,15 +1733,41 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                                     isMapped && !isSelected ? 'hover:bg-indigo-50/40' : 'hover:bg-slate-50'
                                   }`}
                                 >
-                                  <div className="flex items-center justify-between gap-1 w-full h-full">
-                                    <span className="w-full">{cell.value || ''}</span>
-                                    {isMapped && (
-                                      <span 
-                                        className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0 opacity-70 ml-0.5" 
-                                        title={`マッピング連動: ${cell.mappedFieldLabel || ''}`} 
-                                      />
-                                    )}
-                                  </div>
+                                  {isInlineEditing ? (
+                                    <input
+                                      type="text"
+                                      autoFocus
+                                      value={inlineEditingValue}
+                                      onChange={(e) => setInlineEditingValue(e.target.value)}
+                                      onBlur={() => handleCommitInlineEdit(cell.address, inlineEditingValue)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          handleCommitInlineEdit(cell.address, inlineEditingValue);
+                                        } else if (e.key === 'Escape') {
+                                          setInlineEditingCell(null);
+                                        }
+                                      }}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="w-full h-full bg-white text-slate-900 border-2 border-indigo-600 rounded-xs px-1 text-xs font-semibold focus:outline-hidden ring-2 ring-indigo-300 shadow-md"
+                                      style={{ minHeight: '22px' }}
+                                    />
+                                  ) : (
+                                    <div className="flex items-center justify-between gap-1 w-full h-full">
+                                      <span className="w-full">{cell.value || ''}</span>
+                                      {isOverridden && (
+                                        <span 
+                                          className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0 opacity-90 ml-0.5" 
+                                          title="直接書き換え済みセル" 
+                                        />
+                                      )}
+                                      {isMapped && !isOverridden && (
+                                        <span 
+                                          className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0 opacity-70 ml-0.5" 
+                                          title={`マッピング連動: ${cell.mappedFieldLabel || ''}`} 
+                                        />
+                                      )}
+                                    </div>
+                                  )}
                                 </td>
                               );
                             })}
@@ -1506,7 +1782,7 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                 <div className="p-2.5 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500 flex flex-col sm:flex-row items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                    <span>セルをクリックすると上の数式バーおよび左の項目と連動して編集できます。（Ctrl + マウスホイールで拡大縮小可能）</span>
+                    <span>💡 セルWクリックまたは数式バーで直接書き換え可能 / 列ヘッダー右端ドラッグで列幅変更（Ctrl + ホイールで拡大縮小）</span>
                   </div>
                   <div className="flex items-center gap-2 font-mono">
                     <span className="text-indigo-700 font-semibold">

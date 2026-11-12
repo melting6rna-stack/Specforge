@@ -193,7 +193,9 @@ export async function fillSpecificationExcel(
   template: SpecTemplate,
   formValues: Record<string, any>,
   items: EquipmentItem[],
-  docInfo: Record<string, string>
+  docInfo: Record<string, string>,
+  cellOverrides?: Record<string, string>,
+  customColWidths?: Record<string, number>
 ): Promise<Uint8Array> {
   const workbook = new ExcelJS.Workbook();
 
@@ -384,6 +386,31 @@ export async function fillSpecificationExcel(
     });
   }
 
+  // 4. Inject In-Preview Manual Cell Overrides
+  if (cellOverrides) {
+    for (const [addr, val] of Object.entries(cellOverrides)) {
+      if (addr && val !== undefined) {
+        try {
+          const c = worksheet.getCell(addr.toUpperCase());
+          c.value = val;
+        } catch (_) {}
+      }
+    }
+  }
+
+  // 5. Apply Custom Column Widths
+  if (customColWidths) {
+    for (const [colLetter, pixelWidth] of Object.entries(customColWidths)) {
+      const colNum = colLetterToIndex(colLetter);
+      if (colNum > 0) {
+        try {
+          const col = worksheet.getColumn(colNum);
+          col.width = Math.max(1, Math.round(((pixelWidth - 5) / 8.0) * 10) / 10);
+        } catch (_) {}
+      }
+    }
+  }
+
   // Export buffer
   const outBuffer = await workbook.xlsx.writeBuffer();
   return new Uint8Array(outBuffer as ArrayBuffer);
@@ -397,9 +424,11 @@ export async function downloadSpecificationExcel(
   formValues: Record<string, any>,
   items: EquipmentItem[],
   docInfo: Record<string, string>,
-  customFileName?: string
+  customFileName?: string,
+  cellOverrides?: Record<string, string>,
+  customColWidths?: Record<string, number>
 ): Promise<void> {
-  const bytes = await fillSpecificationExcel(template, formValues, items, docInfo);
+  const bytes = await fillSpecificationExcel(template, formValues, items, docInfo, cellOverrides, customColWidths);
   const blob = new Blob([bytes.buffer as ArrayBuffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   });
@@ -516,14 +545,19 @@ export interface RenderedSheetGrid {
   benchmarkMs: number;
 }
 
+export function colLetterToIndex(colLetters: string): number {
+  let col = 0;
+  for (let i = 0; i < colLetters.length; i++) {
+    col = col * 26 + (colLetters.toUpperCase().charCodeAt(i) - 64);
+  }
+  return col;
+}
+
 function parseCellAddress(addr: string): { col: number; row: number } | null {
   const match = addr.match(/^([A-Z]+)([0-9]+)$/i);
   if (!match) return null;
   const letters = match[1].toUpperCase();
-  let col = 0;
-  for (let i = 0; i < letters.length; i++) {
-    col = col * 26 + (letters.charCodeAt(i) - 64);
-  }
+  const col = colLetterToIndex(letters);
   const row = parseInt(match[2], 10);
   return { col, row };
 }
@@ -582,7 +616,9 @@ export async function renderSpecificationExcelGrid(
   formValues: Record<string, any>,
   items: EquipmentItem[],
   docInfo: Record<string, string>,
-  targetSheetOverride?: string
+  targetSheetOverride?: string,
+  cellOverrides?: Record<string, string>,
+  customColWidths?: Record<string, number>
 ): Promise<RenderedSheetGrid> {
   const startTime = performance.now();
 
@@ -720,6 +756,21 @@ export async function renderSpecificationExcelGrid(
     });
   }
 
+  // 3.5 Inject In-Preview Manual Cell Overrides
+  if (cellOverrides) {
+    for (const [addr, val] of Object.entries(cellOverrides)) {
+      if (addr && val !== undefined) {
+        try {
+          const cleanAddr = addr.trim().toUpperCase();
+          worksheet.getCell(cleanAddr).value = val;
+          if (!fieldMappingMap[cleanAddr]) {
+            fieldMappingMap[cleanAddr] = { id: `override-${cleanAddr}`, label: `直接編集セル (${cleanAddr})` };
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
   // 4. Parse Merged Cells
   const mergeList: MergeRangeInfo[] = [];
   const rawMerges: string[] = [];
@@ -818,7 +869,8 @@ export async function renderSpecificationExcelGrid(
 
     // Excel standard character width to pixels: Math.round(chars * 8.0 + 5)
     // Allows faithful thin margins (e.g. 2 chars = 21px) and wide cells (e.g. 50 chars = 405px)
-    const pixelWidth = Math.max(18, Math.round(rawWidth * 8.0 + 5));
+    const basePixelWidth = Math.max(18, Math.round(rawWidth * 8.0 + 5));
+    const pixelWidth = customColWidths?.[colLetter] ?? basePixelWidth;
     columns.push({ colLetter, width: pixelWidth });
   }
 

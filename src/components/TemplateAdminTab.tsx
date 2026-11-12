@@ -111,7 +111,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
         { id: `f-basic-docno`, label: '仕様書番号', cell: 'C4', type: 'text', group: 'basic', defaultValue: 'SPEC-2026-001' },
         { id: `f-basic-date`, label: '発行日', cell: 'G4', type: 'date', group: 'basic', defaultValue: new Date().toISOString().slice(0, 10) },
         { id: `f-basic-issuer`, label: '発行元', cell: 'G5', type: 'text', group: 'basic', defaultValue: '設計部' },
-        { id: `f-basic-notes`, label: '特記事項', cell: 'B23', type: 'textarea', group: 'basic', defaultValue: '特記事項なし。' }
+        { id: `f-basic-notes`, label: '特記事項', cell: 'B23', type: 'textarea', group: 'notes', defaultValue: '特記事項なし。' }
       ];
       clone.fields = [...defaultBasics, ...(clone.fields || [])];
     }

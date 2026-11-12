@@ -46,6 +46,15 @@ export const INITIAL_ITEMS: EquipmentItem[] = [
       { id: 'sp-1-3', name: '耐圧', value: '10', unit: 'K' },
       { id: 'sp-1-4', name: '電圧', value: '100', unit: 'V' }
     ],
+    materials: [
+      { part: '弁箱・弁体', value: 'SCS13A', condition: 'JIS B2002', note: null },
+      { part: '弁棒 (ステム)', value: 'SUS304', condition: null, note: null },
+      { part: 'シート (座)', value: 'PTFE (フッ素樹脂)', condition: null, note: '耐熱150℃' }
+    ],
+    accessories: [
+      { name: '予備Oリング・パッキン一式', quantity: 1, unit: '組', note: 'FKM (バイトン製)' },
+      { name: '手動開閉用六角ハンドル', quantity: 1, unit: '本', note: null }
+    ],
     equipmentType: 'VA',
     diameter: '50A',
     material: 'SCS13A',
@@ -73,6 +82,16 @@ export const INITIAL_ITEMS: EquipmentItem[] = [
       { id: 'sp-2-4', name: '全揚程', value: '30', unit: 'm' },
       { id: 'sp-2-5', name: '材質', value: 'SUS304', unit: '' }
     ],
+    materials: [
+      { part: 'ケーシング', value: 'FC200', condition: 'JIS G5501', note: '外面防錆プライマー塗布' },
+      { part: '羽根車 (インペラ)', value: 'CAC406 (青銅)', condition: null, note: null },
+      { part: '主軸', value: 'SUS403', condition: null, note: null }
+    ],
+    accessories: [
+      { name: '共通ベースプレート', quantity: 1, unit: '台', note: 'SS400製 溶融亜鉛めっき' },
+      { name: 'カップリング＆保護カバー', quantity: 1, unit: '式', note: null },
+      { name: '基礎ボルト・ナット', quantity: 4, unit: '本', note: 'M16×250L' }
+    ],
     diameter: '80A×50A',
     material: 'SUS304',
     createdAt: '2026-03-02',
@@ -96,6 +115,15 @@ export const INITIAL_ITEMS: EquipmentItem[] = [
       { id: 'sp-3-1', name: '容量', value: '3.0', unit: 'm³' },
       { id: 'sp-3-2', name: '材質', value: 'SUS316L', unit: '' },
       { id: 'sp-3-3', name: '設計圧力', value: '0.2', unit: 'MPa' }
+    ],
+    materials: [
+      { part: '胴板・鏡板', value: 'SUS316L', condition: '板厚 6.0mm', note: '内面#400バフ研磨' },
+      { part: '撹拌軸・撹拌翼', value: 'SUS316L', condition: null, note: 'パドル翼 2段' },
+      { part: '架台・支持脚', value: 'SUS304', condition: null, note: null }
+    ],
+    accessories: [
+      { name: '点検マンホール用予備パッキン', quantity: 2, unit: '枚', note: 'PTFE包みガスケット' },
+      { name: '液面計 (ガラス管式)', quantity: 1, unit: '式', note: '目盛付・バルブ付' }
     ],
     diameter: '1500φ×2000H',
     material: 'SUS316L',

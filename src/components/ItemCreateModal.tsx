@@ -10,7 +10,8 @@ import {
   SlidersHorizontal,
   Calendar,
   Hash,
-  FileText
+  FileText,
+  Package
 } from 'lucide-react';
 import { EquipmentItem, Category, EquipmentSpecParam, EquipmentClassification } from '../types';
 import { CLASSIFICATION_OPTIONS, formatTagNo, getClassificationAndSeq, getClassificationLabel } from '../utils/tagNumbering';
@@ -91,6 +92,14 @@ export const ItemCreateModal: React.FC<ItemCreateModalProps> = ({
     { id: `sp-2`, name: '材質', value: 'SUS304', unit: '' }
   ]);
 
+  // Materials state (主要材質構成)
+  const [materials, setMaterials] = useState<Array<{ id: string; part: string; value: string; condition: string; note: string }>>([
+    { id: 'mat-1', part: '本体', value: 'SUS304', condition: '', note: '' }
+  ]);
+
+  // Accessories state (付属品・予備品)
+  const [accessories, setAccessories] = useState<Array<{ id: string; name: string; quantity: string; unit: string; note: string }>>([]);
+
   const [errorMessage, setErrorMessage] = useState('');
 
   // Add a blank specification item
@@ -114,6 +123,44 @@ export const ItemCreateModal: React.FC<ItemCreateModalProps> = ({
     setSpecs(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
   };
 
+  // Materials handlers
+  const handleAddMaterialRow = (part = '本体', value = '') => {
+    setMaterials(prev => [...prev, {
+      id: `mat-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      part,
+      value,
+      condition: '',
+      note: ''
+    }]);
+  };
+
+  const handleRemoveMaterialRow = (id: string) => {
+    setMaterials(prev => prev.filter(m => m.id !== id));
+  };
+
+  const handleUpdateMaterialRow = (id: string, updates: Partial<{ part: string; value: string; condition: string; note: string }>) => {
+    setMaterials(prev => prev.map(m => m.id === id ? { ...m, ...updates } : m));
+  };
+
+  // Accessories handlers
+  const handleAddAccessoryRow = (name = '', quantity = '1', unit = '式') => {
+    setAccessories(prev => [...prev, {
+      id: `acc-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      name,
+      quantity,
+      unit,
+      note: ''
+    }]);
+  };
+
+  const handleRemoveAccessoryRow = (id: string) => {
+    setAccessories(prev => prev.filter(a => a.id !== id));
+  };
+
+  const handleUpdateAccessoryRow = (id: string, updates: Partial<{ name: string; quantity: string; unit: string; note: string }>) => {
+    setAccessories(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
+  };
+
   // Form submit
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -128,6 +175,24 @@ export const ItemCreateModal: React.FC<ItemCreateModalProps> = ({
     // Filter out completely empty spec rows
     const validSpecs = specs.filter(s => s.name.trim() || s.value.trim());
 
+    const validMaterials = materials
+      .filter(m => m.part.trim() || m.value.trim())
+      .map(m => ({
+        part: m.part.trim() || '本体',
+        value: m.value.trim() || null,
+        condition: m.condition.trim() || null,
+        note: m.note.trim() || null
+      }));
+
+    const validAccessories = accessories
+      .filter(a => a.name.trim())
+      .map(a => ({
+        name: a.name.trim(),
+        quantity: a.quantity.trim() ? Number(a.quantity) || null : null,
+        unit: a.unit.trim() || null,
+        note: a.note.trim() || null
+      }));
+
     // Extract diameter & material for backward-compatibility if present in specs
     const diameterSpec = validSpecs.find(s => s.name.includes('口径') || s.name.toLowerCase().includes('size'));
     const materialSpec = validSpecs.find(s => s.name.includes('材質') || s.name.toLowerCase().includes('mat'));
@@ -136,9 +201,13 @@ export const ItemCreateModal: React.FC<ItemCreateModalProps> = ({
       ? `${diameterSpec.value}${diameterSpec.unit ? ' ' + diameterSpec.unit : ''}`.trim()
       : '-';
 
-    const derivedMaterial = materialSpec 
+    let derivedMaterial = materialSpec 
       ? `${materialSpec.value}${materialSpec.unit ? ' ' + materialSpec.unit : ''}`.trim()
       : '-';
+
+    if ((!derivedMaterial || derivedMaterial === '-') && validMaterials.length > 0) {
+      derivedMaterial = validMaterials.map(m => `${m.part}: ${m.value || ''}`).join(', ');
+    }
 
     const newItem: EquipmentItem = {
       id: `eq-${Date.now()}`,
@@ -157,6 +226,8 @@ export const ItemCreateModal: React.FC<ItemCreateModalProps> = ({
       specs: validSpecs,
       diameter: derivedDiameter,
       material: derivedMaterial,
+      materials: validMaterials.length > 0 ? validMaterials : undefined,
+      accessories: validAccessories.length > 0 ? validAccessories : undefined,
       createdAt: nowStr,
       updatedAt: nowStr
     };
@@ -353,7 +424,7 @@ export const ItemCreateModal: React.FC<ItemCreateModalProps> = ({
                 {/* 数量・単位の右側に発行チェック欄を配置 */}
                 <div className="col-span-4 sm:col-span-3">
                   <label className="block font-semibold text-slate-700 mb-1 flex items-center justify-between">
-                    <span>仕様書発行</span>
+                    <span>発行</span>
                     <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
                       isIssued ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'
                     }`}>
@@ -371,7 +442,7 @@ export const ItemCreateModal: React.FC<ItemCreateModalProps> = ({
                       onChange={(e) => setIsIssued(e.target.checked)}
                       className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300 cursor-pointer"
                     />
-                    <span className="truncate">{isIssued ? '発行済み (済)' : '未発行 (未)'}</span>
+                    <span className="truncate">{isIssued ? '済 (発行済み)' : '未 (未発行)'}</span>
                   </label>
                 </div>
               </div>
@@ -513,6 +584,201 @@ export const ItemCreateModal: React.FC<ItemCreateModalProps> = ({
                   ))}
               </div>
             )}
+          </div>
+
+          {/* Section: 主要材質構成 (materials) */}
+          <div className="border border-slate-200 bg-slate-50/70 rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="font-bold text-slate-900 flex items-center gap-1.5 text-xs">
+                  <Layers className="w-4 h-4 text-slate-700" />
+                  <span>主要材質構成 (materials)</span>
+                </span>
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  部品名ごとの材質記号（SCS13A, SUS304等）や規格・条件を漏れなく管理できます。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleAddMaterialRow('本体', '')}
+                className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 rounded text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+              >
+                <Plus className="w-3 h-3" />
+                <span>材質を追加</span>
+              </button>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-2xs">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-slate-100/80 text-slate-700 font-semibold border-b border-slate-200">
+                  <tr>
+                    <th className="py-2 px-3 w-1/4">部品名 (part)</th>
+                    <th className="py-2 px-3 w-1/4">材質記号 (value)</th>
+                    <th className="py-2 px-3 w-1/4">規格・条件 (condition)</th>
+                    <th className="py-2 px-3 w-1/5">備考 (note)</th>
+                    <th className="py-2 px-2 text-center w-8"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {materials.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-3 text-center text-slate-400 text-[11px]">
+                        材質情報が登録されていません。「材質を追加」ボタンから部品ごとの材質を設定できます。
+                      </td>
+                    </tr>
+                  ) : (
+                    materials.map((m) => (
+                      <tr key={m.id} className="hover:bg-slate-50">
+                        <td className="py-1.5 px-3">
+                          <input
+                            type="text"
+                            placeholder="例: 本体, 弁棒, ケーシング..."
+                            value={m.part}
+                            onChange={(e) => handleUpdateMaterialRow(m.id, { part: e.target.value })}
+                            className="w-full border border-slate-200 rounded px-2 py-1 text-xs font-medium focus:border-indigo-500 focus:outline-hidden"
+                          />
+                        </td>
+                        <td className="py-1.5 px-3">
+                          <input
+                            type="text"
+                            placeholder="例: SCS13A, SUS304, FC200..."
+                            value={m.value}
+                            onChange={(e) => handleUpdateMaterialRow(m.id, { value: e.target.value })}
+                            className="w-full border border-slate-200 rounded px-2 py-1 text-xs font-mono font-bold text-slate-900 focus:border-indigo-500 focus:outline-hidden"
+                          />
+                        </td>
+                        <td className="py-1.5 px-3">
+                          <input
+                            type="text"
+                            placeholder="例: JIS B2002, 耐食耐酸..."
+                            value={m.condition}
+                            onChange={(e) => handleUpdateMaterialRow(m.id, { condition: e.target.value })}
+                            className="w-full border border-slate-200 rounded px-2 py-1 text-xs text-slate-600 focus:border-indigo-500 focus:outline-hidden"
+                          />
+                        </td>
+                        <td className="py-1.5 px-3">
+                          <input
+                            type="text"
+                            placeholder="例: 溶接補修不可..."
+                            value={m.note}
+                            onChange={(e) => handleUpdateMaterialRow(m.id, { note: e.target.value })}
+                            className="w-full border border-slate-200 rounded px-2 py-1 text-xs text-slate-500 focus:border-indigo-500 focus:outline-hidden"
+                          />
+                        </td>
+                        <td className="py-1.5 px-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveMaterialRow(m.id)}
+                            className="text-slate-400 hover:text-red-600 p-1 rounded"
+                            title="削除"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Section: 付属品・予備品 (accessories) */}
+          <div className="border border-slate-200 bg-slate-50/70 rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="font-bold text-slate-900 flex items-center gap-1.5 text-xs">
+                  <Package className="w-4 h-4 text-slate-700" />
+                  <span>付属品・予備品 (accessories)</span>
+                </span>
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  機器に付属する品目（予備品・専用工具・共通ベース等）の名称と数量・単位を管理します。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleAddAccessoryRow('', '1', '式')}
+                className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 rounded text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+              >
+                <Plus className="w-3 h-3" />
+                <span>付属品を追加</span>
+              </button>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-2xs">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-slate-100/80 text-slate-700 font-semibold border-b border-slate-200">
+                  <tr>
+                    <th className="py-2 px-3 w-1/3">品名・品目 (name)</th>
+                    <th className="py-2 px-3 w-1/6">数量</th>
+                    <th className="py-2 px-3 w-1/6">単位</th>
+                    <th className="py-2 px-3 w-1/4">備考 (note)</th>
+                    <th className="py-2 px-2 text-center w-8"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {accessories.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-3 text-center text-slate-400 text-[11px]">
+                        付属品情報が登録されていません。「付属品を追加」ボタンから追加できます。
+                      </td>
+                    </tr>
+                  ) : (
+                    accessories.map((a) => (
+                      <tr key={a.id} className="hover:bg-slate-50">
+                        <td className="py-1.5 px-3">
+                          <input
+                            type="text"
+                            placeholder="例: 予備Oリング, 特殊ハンドル..."
+                            value={a.name}
+                            onChange={(e) => handleUpdateAccessoryRow(a.id, { name: e.target.value })}
+                            className="w-full border border-slate-200 rounded px-2 py-1 text-xs font-medium focus:border-indigo-500 focus:outline-hidden"
+                          />
+                        </td>
+                        <td className="py-1.5 px-3">
+                          <input
+                            type="number"
+                            min="0"
+                            placeholder="1"
+                            value={a.quantity}
+                            onChange={(e) => handleUpdateAccessoryRow(a.id, { quantity: e.target.value })}
+                            className="w-full border border-slate-200 rounded px-2 py-1 text-xs font-mono font-medium focus:border-indigo-500 focus:outline-hidden"
+                          />
+                        </td>
+                        <td className="py-1.5 px-3">
+                          <input
+                            type="text"
+                            placeholder="例: 個, 組, 台, 式..."
+                            value={a.unit}
+                            onChange={(e) => handleUpdateAccessoryRow(a.id, { unit: e.target.value })}
+                            className="w-full border border-slate-200 rounded px-2 py-1 text-xs font-mono text-slate-600 focus:border-indigo-500 focus:outline-hidden"
+                          />
+                        </td>
+                        <td className="py-1.5 px-3">
+                          <input
+                            type="text"
+                            placeholder="例: FKM製, 耐熱仕様..."
+                            value={a.note}
+                            onChange={(e) => handleUpdateAccessoryRow(a.id, { note: e.target.value })}
+                            className="w-full border border-slate-200 rounded px-2 py-1 text-xs text-slate-500 focus:border-indigo-500 focus:outline-hidden"
+                          />
+                        </td>
+                        <td className="py-1.5 px-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveAccessoryRow(a.id)}
+                            className="text-slate-400 hover:text-red-600 p-1 rounded"
+                            title="削除"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {/* Section 3: 特記事項 */}
