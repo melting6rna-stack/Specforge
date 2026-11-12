@@ -50,7 +50,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
   );
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [editingTemplate, setEditingTemplate] = useState<SpecTemplate | null>(null);
-  const [activeTabSub, setActiveTabSub] = useState<'fields' | 'basic' | 'table' | 'asset'>('fields');
+  const [activeTabSub, setActiveTabSub] = useState<'fields' | 'basic' | 'asset'>('fields');
   const [message, setMessage] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
 
@@ -634,7 +634,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                 }`}
               >
                 <Target className="w-3.5 h-3.5" />
-                <span>セル番地マッピング・チェック項目定義 ({specFields.length + checkboxFields.length})</span>
+                <span>セル番地マッピング（機器明細・仕様項目・チェック設定）</span>
               </button>
               <button
                 onClick={() => setActiveTabSub('basic')}
@@ -646,17 +646,6 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
               >
                 <Layers className="w-3.5 h-3.5" />
                 <span>基本情報マッピング ({basicFields.length})</span>
-              </button>
-              <button
-                onClick={() => setActiveTabSub('table')}
-                className={`px-4 py-2 font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
-                  activeTabSub === 'table'
-                    ? 'border-indigo-600 text-indigo-700'
-                    : 'border-transparent text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                <Table className="w-3.5 h-3.5" />
-                <span>明細テーブル列マッピング</span>
               </button>
               <button
                 onClick={() => setActiveTabSub('asset')}
@@ -675,7 +664,162 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
           {/* Sub Tab 1: Fields & Cell Address Mapping */}
           {activeTabSub === 'fields' && (
             <div className="space-y-4">
-              {/* Section 1: Specification fields */}
+
+              {/* Integrated Section 1: 対象機器 明細テーブル セル番地マッピング */}
+              <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                  <div>
+                    <h2 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <Table className="w-4 h-4 text-indigo-600" />
+                      <span>対象機器 明細テーブル セル番地マッピング</span>
+                    </h2>
+                    <p className="text-[11px] text-slate-500">
+                      案件に含まれる機器リスト（機器番号、機器名、仕様、材質、数量、納期）を流し込むExcel原本の列と各行のセル番地です。
+                    </p>
+                  </div>
+
+                  {/* Settings toolbar: Target Sheet, Start Row */}
+                  <div className="flex items-center gap-2 flex-wrap text-xs bg-slate-50 p-1.5 rounded-lg border border-slate-200">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[11px] text-slate-500 font-medium">対象シート:</span>
+                      <input
+                        type="text"
+                        disabled={!isEditing}
+                        value={activeTpl.tableMapping?.targetSheetName || '仕様書'}
+                        onChange={(e) => {
+                          if (editingTemplate) {
+                            setEditingTemplate({
+                              ...editingTemplate,
+                              tableMapping: {
+                                ...editingTemplate.tableMapping!,
+                                targetSheetName: e.target.value
+                              }
+                            });
+                          }
+                        }}
+                        className="w-20 text-[11px] bg-white border border-slate-300 rounded px-1.5 py-0.5 font-mono disabled:opacity-75"
+                        placeholder="仕様書"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <span className="text-[11px] text-slate-500 font-medium">開始行:</span>
+                      <input
+                        type="number"
+                        disabled={!isEditing}
+                        value={activeTpl.tableMapping?.startRow || 15}
+                        onChange={(e) => {
+                          const newRow = parseInt(e.target.value, 10) || 15;
+                          if (editingTemplate) {
+                            setEditingTemplate({
+                              ...editingTemplate,
+                              tableMapping: {
+                                ...editingTemplate.tableMapping!,
+                                startRow: newRow
+                              }
+                            });
+                          }
+                        }}
+                        className="w-14 text-[11px] bg-white border border-slate-300 rounded px-1.5 py-0.5 font-mono text-center font-bold disabled:opacity-75"
+                      />
+                      <span className="text-[11px] text-slate-400">行目〜</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
+                      <tr>
+                        <th className="p-2 w-36">明細項目名</th>
+                        <th className="p-2 w-16 text-center">列</th>
+                        <th className="p-2 w-28 bg-indigo-50/60 font-bold text-indigo-900">1行目 (1台目)</th>
+                        <th className="p-2 w-24">2行目 (2台目)</th>
+                        <th className="p-2 w-24">3行目 (3台目)</th>
+                        <th className="p-2 w-24">4行目 (4台目)</th>
+                        <th className="p-2">転記元データ / 説明</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {[
+                        { key: 'tagNoCol', label: '機器番号', defaultCol: 'B', desc: '機器タグ番号 (例: V-101, P-101)' },
+                        { key: 'nameCol', label: '機器名', defaultCol: 'C', desc: '機器名称 (例: ポールユニット, 渦巻ポンプ)' },
+                        { key: 'diameterCol', label: '口径・主要仕様', defaultCol: 'D', desc: '口径や主要仕様パラメータ (例: 50A 10K)' },
+                        { key: 'materialCol', label: '主要材質', defaultCol: 'E', desc: '材質 (例: SCS13A, SUS304)' },
+                        { key: 'quantityCol', label: '数量', defaultCol: 'F', desc: '発注数量・単位 (例: 4台)' },
+                        { key: 'deliveryDateCol', label: '納期', defaultCol: 'G', desc: '納入指定時期 (例: 2026/09/15)' },
+                        { key: 'notesCol', label: '特記事項・備考', defaultCol: 'H', desc: '機器個別備考・特記事項' },
+                      ].map(item => {
+                        const colLetter = (activeTpl.tableMapping as any)?.[item.key] || item.defaultCol;
+                        const startRow = activeTpl.tableMapping?.startRow || 15;
+                        const slot1 = `${colLetter}${startRow}`;
+                        const slot2 = `${colLetter}${startRow + 1}`;
+                        const slot3 = `${colLetter}${startRow + 2}`;
+                        const slot4 = `${colLetter}${startRow + 3}`;
+
+                        return (
+                          <tr key={item.key} className="hover:bg-slate-50/60 transition-colors">
+                            <td className="p-2 font-bold text-slate-800 flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
+                              <span>{item.label}</span>
+                            </td>
+                            <td className="p-2 text-center">
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  value={colLetter}
+                                  onChange={(e) => {
+                                    if (editingTemplate) {
+                                      setEditingTemplate({
+                                        ...editingTemplate,
+                                        tableMapping: {
+                                          ...editingTemplate.tableMapping!,
+                                          [item.key]: e.target.value.toUpperCase()
+                                        }
+                                      });
+                                    }
+                                  }}
+                                  className="w-10 text-xs font-mono font-bold text-center bg-white border border-slate-300 rounded p-1 uppercase"
+                                  title="列アルファベットを変更"
+                                />
+                              ) : (
+                                <span className="font-mono font-bold bg-slate-100 text-slate-800 px-2 py-0.5 rounded text-[11px] border border-slate-200">
+                                  {colLetter}列
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-2 bg-indigo-50/30">
+                              <span className="font-mono font-bold text-indigo-700 bg-indigo-100/70 border border-indigo-200 px-2 py-0.5 rounded text-xs">
+                                {slot1}
+                              </span>
+                            </td>
+                            <td className="p-2">
+                              <span className="font-mono text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-xs">
+                                {slot2}
+                              </span>
+                            </td>
+                            <td className="p-2">
+                              <span className="font-mono text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-xs">
+                                {slot3}
+                              </span>
+                            </td>
+                            <td className="p-2">
+                              <span className="font-mono text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-xs">
+                                {slot4}
+                              </span>
+                            </td>
+                            <td className="p-2 text-[11px] text-slate-500">
+                              {item.desc}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Section 2: Specification fields */}
               <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                   <div>
@@ -1082,105 +1226,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
             </div>
           )}
 
-          {/* Sub Tab 2: Table Column Mapping */}
-          {activeTabSub === 'table' && (
-            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-4">
-              <div className="border-b border-slate-100 pb-2">
-                <h2 className="text-xs font-bold text-slate-900">
-                  機器一覧 明細テーブル書き込み設定 (ExcelJS対応)
-                </h2>
-                <p className="text-[11px] text-slate-500">
-                  マスター雛形Excel内で機器リストが流し込まれる開始行と、各項目の列アルファベットを指定します。
-                </p>
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                <div>
-                  <label className="text-[11px] font-semibold text-slate-700 block mb-1">
-                    対象ワークシート名 (省略時は第1シート)
-                  </label>
-                  <input
-                    type="text"
-                    disabled={!isEditing}
-                    value={activeTpl.tableMapping?.targetSheetName || '仕様書'}
-                    onChange={(e) => {
-                      if (editingTemplate) {
-                        setEditingTemplate({
-                          ...editingTemplate,
-                          tableMapping: {
-                            ...editingTemplate.tableMapping!,
-                            targetSheetName: e.target.value
-                          }
-                        });
-                      }
-                    }}
-                    className="w-full text-xs bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5 font-mono disabled:opacity-75"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-semibold text-slate-700 block mb-1">
-                    明細書き込み開始行 (1行目にヘッダーがある場合のデータ行)
-                  </label>
-                  <input
-                    type="number"
-                    disabled={!isEditing}
-                    value={activeTpl.tableMapping?.startRow || 15}
-                    onChange={(e) => {
-                      if (editingTemplate) {
-                        setEditingTemplate({
-                          ...editingTemplate,
-                          tableMapping: {
-                            ...editingTemplate.tableMapping!,
-                            startRow: parseInt(e.target.value, 10) || 15
-                          }
-                        });
-                      }
-                    }}
-                    className="w-full text-xs bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5 font-mono disabled:opacity-75"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-2 border-t border-slate-100">
-                <h3 className="text-[11px] font-bold text-slate-800 mb-2">
-                  各列のアルファベット指定:
-                </h3>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                  {[
-                    { key: 'tagNoCol', label: '機器番号 列', defaultCol: 'B' },
-                    { key: 'nameCol', label: '機器名 列', defaultCol: 'C' },
-                    { key: 'diameterCol', label: '口径・仕様 列', defaultCol: 'D' },
-                    { key: 'materialCol', label: '材質 列', defaultCol: 'E' },
-                    { key: 'quantityCol', label: '数量 列', defaultCol: 'F' },
-                    { key: 'deliveryDateCol', label: '納期 列', defaultCol: 'G' },
-                    { key: 'notesCol', label: '特記事項 列', defaultCol: 'H' },
-                  ].map(colItem => (
-                    <div key={colItem.key}>
-                      <span className="text-[10px] text-slate-500 block mb-0.5">{colItem.label}</span>
-                      <input
-                        type="text"
-                        disabled={!isEditing}
-                        value={(activeTpl.tableMapping as any)?.[colItem.key] || colItem.defaultCol}
-                        onChange={(e) => {
-                          if (editingTemplate) {
-                            setEditingTemplate({
-                              ...editingTemplate,
-                              tableMapping: {
-                                ...editingTemplate.tableMapping!,
-                                [colItem.key]: e.target.value.toUpperCase()
-                              }
-                            });
-                          }
-                        }}
-                        className="w-full text-xs font-mono font-bold bg-slate-50 border border-slate-300 rounded px-2 py-1 text-center disabled:opacity-75 uppercase"
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Sub Tab 3: JSON Asset View */}
           {activeTabSub === 'asset' && (

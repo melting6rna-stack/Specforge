@@ -21,7 +21,6 @@ import {
 } from 'lucide-react';
 import { EquipmentItem, SpecTemplate, Category, SpecFieldMapping, ProjectWorkspace } from '../types';
 import { downloadSpecificationExcel, renderSpecificationExcelGrid, RenderedSheetGrid, RenderedCellData } from '../utils/exceljsEngine';
-import { convertElementToPdfBlob } from '../utils/pdfGenerator';
 
 interface SpecDashboardTabProps {
   items: EquipmentItem[];
@@ -129,13 +128,7 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
     setInlineEditingCell(null);
   }, [activeTemplate?.id]);
 
-  // PDF Preview State & Offscreen A4 Reference
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-  const [isGeneratingPdf, setIsGeneratingPdf] = useState<boolean>(false);
-  const [previewMode, setPreviewMode] = useState<'pdf' | 'excel'>('pdf');
-  const [pdfNotice, setPdfNotice] = useState<string>('');
-  const [isExportMenuOpen, setIsExportMenuOpen] = useState<boolean>(false);
-  const specSheetRef = useRef<HTMLDivElement | null>(null);
+
 
   // Auto-calculated document number: 案件コードの後にハイフン入れず機器種別の2文字+G、ハイフン+機器番号
   const fixedDocNo = useMemo(() => {
@@ -207,6 +200,27 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
       }
 
       // 1. Direct equipment parameter matching
+      if (labelClean.includes('機器番号') || labelClean.includes('tag') || labelClean.includes('タグ番号')) {
+        newVals[f.id] = item.tagNo || '';
+        matched[f.id] = `機器「機器番号」: ${item.tagNo || ''}`;
+        continue;
+      }
+      if (labelClean.includes('機器名') || labelClean.includes('機器名称') || (labelClean.includes('品名') && !labelClean.includes('付属') && !labelClean.includes('予備'))) {
+        newVals[f.id] = item.name || '';
+        matched[f.id] = `機器「機器名」: ${item.name || ''}`;
+        continue;
+      }
+      if (labelClean.includes('数量')) {
+        const qVal = `${item.quantity || 1} ${item.unit || '台'}`;
+        newVals[f.id] = qVal;
+        matched[f.id] = `機器「数量」: ${qVal}`;
+        continue;
+      }
+      if (labelClean.includes('納期') || labelClean.includes('納入時期')) {
+        newVals[f.id] = item.deliveryDate || '';
+        matched[f.id] = `機器「納入時期」: ${item.deliveryDate || ''}`;
+        continue;
+      }
       if (labelClean.includes('口径') && item.diameter && item.diameter !== '-') {
         newVals[f.id] = item.diameter;
         matched[f.id] = `機器「口径」: ${item.diameter}`;
@@ -329,13 +343,12 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
     return selectedCell?.value ?? '';
   }, [selectedCellAddress, cellOverrides, selectedCellMappedField, formValues, selectedCell]);
 
-  // Total column width for proportional PDF table layout
+
+  // Total column width for Excel spreadsheet table sizing
   const totalColWidth = useMemo(() => {
-    if (!excelGridData?.columns || excelGridData.columns.length === 0) return 1;
+    if (!excelGridData?.columns || excelGridData.columns.length === 0) return 960;
     return excelGridData.columns.reduce((sum, c) => sum + c.width, 0);
   }, [excelGridData]);
-
-  // Handle cell edit via formula bar (both mapped and unmapped arbitrary cells)
   const handleFormulaChange = (newVal: string) => {
     if (!selectedCellAddress) return;
     if (selectedCellMappedField) {
@@ -486,33 +499,9 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
     setFormValues(newVals);
     setTransferredFieldsMap(matchedMap);
     setRenderCounter(c => c + 1);
-    setPdfNotice('再読み込み完了: 入力情報とマッピングをプレビューに反映しました');
-    setTimeout(() => setPdfNotice(''), 3000);
+    setExportNotice('再読み込み完了: 入力情報とマッピングをプレビューに反映しました');
+    setTimeout(() => setExportNotice(''), 3000);
   }, [primaryItem, activeTemplate, formValues, transferSpecsFromEquipment]);
-
-  // Download PDF file directly by capturing visible A4 spec sheet
-  const handleDownloadPdf = async () => {
-    if (!specSheetRef.current) return;
-    setIsGeneratingPdf(true);
-    setPdfNotice('PDF出力ファイルを生成中...');
-    setIsExportMenuOpen(false);
-    try {
-      const res = await convertElementToPdfBlob(specSheetRef.current);
-      const a = document.createElement('a');
-      a.href = res.url;
-      a.download = `${activeTemplate?.name || '仕様書'}_${fixedDocNo || 'SPEC'}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setPdfNotice('PDF出力が完了しました');
-      setTimeout(() => setPdfNotice(''), 3500);
-    } catch (err: any) {
-      console.error('PDF generation error:', err);
-      alert(`PDF生成中にエラーが発生しました: ${err.message || 'ブラウザの描画設定をご確認ください'}`);
-    } finally {
-      setIsGeneratingPdf(false);
-    }
-  };
 
   // Toggle state to pull out / expand basic individual fields
   const [isBasicEditOpen, setIsBasicEditOpen] = useState<boolean>(false);
@@ -563,9 +552,6 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
             <h1 className="text-base font-bold text-slate-900 flex items-center gap-1.5">
               <span>仕様書リアルタイム生成 ＆ セル転記スタジオ</span>
             </h1>
-            <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-2 py-0.5 rounded">
-              （編集中）
-            </span>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
             機器仕様のセル自動転記・案件共通情報の一律反映・Excel原本へのメモリ内直接再描画をリアルタイムでプレビューできます。
@@ -606,9 +592,6 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
               <label className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
                 <FileText className="w-4 h-4 text-indigo-600" />
                 <span>仕様書テンプレートの選択</span>
-                <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.2 rounded">
-                  （編集中）
-                </span>
               </label>
             </div>
 
@@ -622,7 +605,7 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
             >
               {templates.map(t => (
                 <option key={t.id} value={t.id}>
-                  {t.name} ({t.code}){t.id === selectedTemplateId ? '（編集中）' : ''}
+                  {t.name} ({t.code})
                 </option>
               ))}
             </select>
@@ -1173,324 +1156,93 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
           <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-2xs space-y-2.5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <div className={`w-8 h-8 rounded-lg flex items-center justify-center border shrink-0 ${
-                  previewMode === 'pdf' 
-                    ? 'bg-rose-50 text-rose-700 border-rose-200' 
-                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                }`}>
-                  {previewMode === 'pdf' ? <FileText className="w-4 h-4" /> : <FileSpreadsheet className="w-4 h-4" />}
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center border shrink-0 bg-emerald-50 text-emerald-700 border-emerald-200">
+                  <FileSpreadsheet className="w-4 h-4" />
                 </div>
                 <div>
                   <div className="flex items-center gap-1.5">
                     <h2 className="text-xs font-bold text-slate-900">
                       仕様書プレビュー
                     </h2>
-                    <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.2 rounded">
-                      （編集中）
-                    </span>
                   </div>
                   <p className="text-[11px] text-slate-500">
-                    {previewMode === 'pdf' 
-                      ? '入力内容とマッピングをリアルタイムに帳票へ反映しています' 
-                      : 'ExcelJSメモリ内原本スプレッドシート（セル直接クリック・数式バー編集対応）'}
+                    Excel原本スプレッドシート（セル直接クリック・数式バー編集・列幅調整対応）
                   </p>
                 </div>
               </div>
 
-              {/* Action Buttons: Reload, Unified Export Dropdown, and Zoom */}
+              {/* Action Buttons: Reload and Direct Excel Export */}
               <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
                 {/* Prominent Reload Preview Button */}
                 <button
                   type="button"
                   onClick={handleReloadPreview}
-                  disabled={isGeneratingPdf}
-                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
+                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
                   title="入力やマッピングの変更を再読み込みして最新プレビューを反映"
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingPdf ? 'animate-spin' : ''}`} />
+                  <RefreshCw className="w-3.5 h-3.5" />
                   <span>再読み込み</span>
                 </button>
 
-                {/* Unified Output Button with Dropdown (PDF / Excel) */}
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setIsExportMenuOpen(prev => !prev)}
-                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
-                    title="仕様書ファイルを出力 (PDFまたはExcel)"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>出力</span>
-                    <ChevronDown className={`w-3 h-3 transition-transform ${isExportMenuOpen ? 'rotate-180' : ''}`} />
-                  </button>
-
-                  {isExportMenuOpen && (
-                    <>
-                      <div 
-                        className="fixed inset-0 z-40" 
-                        onClick={() => setIsExportMenuOpen(false)} 
-                      />
-                      <div className="absolute right-0 mt-1.5 w-56 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-50 animate-in fade-in zoom-in-95">
-                        <div className="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1">
-                          出力形式を選択
-                        </div>
-                        <button
-                          type="button"
-                          onClick={handleDownloadPdf}
-                          disabled={isGeneratingPdf}
-                          className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-rose-50 hover:text-rose-700 flex items-center gap-2.5 transition-colors cursor-pointer"
-                        >
-                          <div className="w-7 h-7 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
-                            <FileText className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <div className="font-bold flex items-center gap-1">
-                              <span>PDF出力</span>
-                              <span className="text-[10px] text-rose-600 font-mono">(.pdf)</span>
-                            </div>
-                            <div className="text-[10px] text-slate-400">提出・印刷用フォーマット</div>
-                          </div>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={handleExportExcel}
-                          disabled={isExporting}
-                          className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center gap-2.5 transition-colors cursor-pointer"
-                        >
-                          <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
-                            <FileSpreadsheet className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <div className="font-bold flex items-center gap-1">
-                              <span>Excel出力</span>
-                              <span className="text-[10px] text-emerald-600 font-mono">(.xlsx)</span>
-                            </div>
-                            <div className="text-[10px] text-slate-400">原本マスター雛形に直接反映</div>
-                          </div>
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                {/* Zoom Controls */}
-                <div className="flex items-center bg-slate-100 border border-slate-200 rounded-lg p-0.5 text-xs shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setPreviewZoom(z => Math.max(50, z - 10))}
-                    className="p-1 hover:bg-white rounded text-slate-600 hover:text-slate-900 cursor-pointer"
-                    title="縮小"
-                  >
-                    <ZoomOut className="w-3.5 h-3.5" />
-                  </button>
-                  <span className="px-1.5 font-mono text-[11px] font-semibold text-slate-700 select-none">
-                    {previewZoom}%
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setPreviewZoom(z => Math.min(150, z + 10))}
-                    className="p-1 hover:bg-white rounded text-slate-600 hover:text-slate-900 cursor-pointer"
-                    title="拡大"
-                  >
-                    <ZoomIn className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                {/* Direct Excel Export Button */}
+                <button
+                  type="button"
+                  onClick={handleExportExcel}
+                  disabled={isExporting}
+                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
+                  title="原本マスター雛形に直接反映してExcel出力 (.xlsx)"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>{isExporting ? '出力中...' : 'Excel出力'}</span>
+                </button>
               </div>
             </div>
 
             {/* Notification Bar */}
-            {(pdfNotice || exportNotice) && (
+            {exportNotice && (
               <div className="bg-indigo-50 border border-indigo-200 text-indigo-900 text-xs px-3 py-1.5 rounded-lg flex items-center justify-between animate-in fade-in">
                 <span className="flex items-center gap-1.5 font-medium">
                   <CheckSquare className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                  {pdfNotice || exportNotice}
+                  {exportNotice}
                 </span>
-                <button onClick={() => { setPdfNotice(''); setExportNotice(''); }} className="text-indigo-400 hover:text-indigo-700 cursor-pointer">✕</button>
+                <button onClick={() => setExportNotice('')} className="text-indigo-400 hover:text-indigo-700 cursor-pointer">✕</button>
               </div>
             )}
 
-            {/* PREVIEW MODE TABS (Clean tabs spanning across canvas) */}
-            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
-              <button
-                type="button"
-                onClick={() => setPreviewMode('pdf')}
-                className={`flex-1 py-2 px-4 rounded-lg font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-2 ${
-                  previewMode === 'pdf'
-                    ? 'bg-white text-rose-700 shadow-sm border border-slate-200'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-                }`}
-              >
-                <FileText className="w-4 h-4 text-rose-600" />
-                <span>PDF (仕様書帳票)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setPreviewMode('excel')}
-                className={`flex-1 py-2 px-4 rounded-lg font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-2 ${
-                  previewMode === 'excel'
-                    ? 'bg-white text-emerald-700 shadow-sm border border-slate-200'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-                }`}
-              >
-                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                <span>EXCEL (原本直接描画)</span>
-              </button>
+            {/* Excel Formula Bar: Shown directly in header */}
+            <div className="bg-slate-50 border border-slate-300 rounded-lg p-1.5 flex items-center gap-2 text-xs">
+              <div className="flex items-center gap-1 font-mono font-bold bg-white border border-slate-300 px-2 py-1 rounded text-slate-800 shrink-0 shadow-2xs">
+                <span className="text-indigo-600">セル:</span>
+                <span className="text-slate-900">{selectedCellAddress}</span>
+              </div>
+              <span className="font-mono text-slate-400 font-bold px-1 select-none text-xs">fx</span>
+              <input
+                type="text"
+                value={currentFormulaValue}
+                onChange={(e) => handleFormulaChange(e.target.value)}
+                placeholder={selectedCellMappedField ? `【${selectedCellMappedField.label}】の値を直接編集...` : '選択したセルの値を直接入力・書き換え...'}
+                className="flex-1 bg-white border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-900 font-medium focus:outline-hidden focus:border-indigo-500 shadow-2xs"
+              />
+              {selectedCellMappedField ? (
+                <span className="text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded font-medium whitespace-nowrap shrink-0 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
+                  連動: {selectedCellMappedField.label}
+                </span>
+              ) : cellOverrides[selectedCellAddress] !== undefined ? (
+                <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded font-medium whitespace-nowrap shrink-0 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                  直接書き換え済み
+                </span>
+              ) : (
+                <span className="text-[10px] text-slate-400 border border-slate-200 bg-white px-2 py-0.5 rounded font-mono whitespace-nowrap shrink-0">
+                  任意セル (直接入力可)
+                </span>
+              )}
             </div>
-
-            {/* Excel Formula Bar: Shown when in Excel mode */}
-            {previewMode === 'excel' && (
-              <div className="bg-slate-50 border border-slate-300 rounded-lg p-1.5 flex items-center gap-2 text-xs">
-                <div className="flex items-center gap-1 font-mono font-bold bg-white border border-slate-300 px-2 py-1 rounded text-slate-800 shrink-0 shadow-2xs">
-                  <span className="text-indigo-600">セル:</span>
-                  <span className="text-slate-900">{selectedCellAddress}</span>
-                </div>
-                <span className="font-mono text-slate-400 font-bold px-1 select-none text-xs">fx</span>
-                <input
-                  type="text"
-                  value={currentFormulaValue}
-                  onChange={(e) => handleFormulaChange(e.target.value)}
-                  placeholder={selectedCellMappedField ? `【${selectedCellMappedField.label}】の値を直接編集...` : '選択したセルの値を直接入力・書き換え...'}
-                  className="flex-1 bg-white border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-900 font-medium focus:outline-hidden focus:border-indigo-500 shadow-2xs"
-                />
-                {selectedCellMappedField ? (
-                  <span className="text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded font-medium whitespace-nowrap shrink-0 flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
-                    連動: {selectedCellMappedField.label}
-                  </span>
-                ) : cellOverrides[selectedCellAddress] !== undefined ? (
-                  <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded font-medium whitespace-nowrap shrink-0 flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                    直接書き換え済み
-                  </span>
-                ) : (
-                  <span className="text-[10px] text-slate-400 border border-slate-200 bg-white px-2 py-0.5 rounded font-mono whitespace-nowrap shrink-0">
-                    任意セル (直接入力可)
-                  </span>
-                )}
-              </div>
-            )}
           </div>
 
-          {/* VIEW MODE 1: PDF SPECIFICATION SHEET PREVIEW */}
-          {previewMode === 'pdf' && (
-            <div className="space-y-2">
-              <div className="bg-slate-100 border border-slate-300 rounded-xl p-4 sm:p-6 overflow-x-auto flex justify-center shadow-inner">
-                {/* Authentic A4 Specification Document Container: Converted from Loaded Excel Template */}
-                <div
-                  ref={specSheetRef}
-                  style={{
-                    width: '794px',
-                    minHeight: '1123px',
-                    transform: previewZoom !== 100 ? `scale(${previewZoom / 100})` : undefined,
-                    transformOrigin: 'top center',
-                    backgroundColor: '#ffffff',
-                    color: '#0f172a',
-                    boxSizing: 'border-box',
-                    padding: '36px 36px',
-                    fontFamily: '"Hiragino Sans", "Meiryo", "BIZ UDPGothic", "Yu Gothic", sans-serif',
-                  }}
-                  className="shadow-xl rounded-sm border border-slate-300 transition-transform text-slate-900 bg-white"
-                >
-                  {/* Document Header Badge */}
-                  <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pb-1 border-b border-slate-200 mb-3">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-bold text-slate-700">【原本テンプレート直接描画帳票】</span>
-                      <span>{activeTemplate?.name || '調達仕様書'}</span>
-                      <span className="bg-slate-100 text-slate-600 px-1 py-0.2 rounded border border-slate-200 font-bold">{activeTemplate?.code || 'TPL'}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span>シート: <strong className="text-slate-600">{selectedSheetOverride || excelGridData?.sheetName || '仕様書'}</strong></span>
-                      <span>|</span>
-                      <span>仕様書番号: <strong className="text-indigo-900">{formValues['f-docno'] || fixedDocNo}</strong></span>
-                    </div>
-                  </div>
-
-                  {/* Template Table Rendered Directly from ExcelJS In-Memory Grid */}
-                  {excelGridData && excelGridData.rows.length > 0 ? (
-                    <div className="w-full">
-                      <table className="w-full border-collapse table-fixed text-slate-900" style={{ fontSize: '10px' }}>
-                        <colgroup>
-                          {excelGridData.columns.map(col => (
-                            <col 
-                              key={col.colLetter} 
-                              style={{ width: `${(col.width / totalColWidth) * 100}%` }} 
-                            />
-                          ))}
-                        </colgroup>
-                        <tbody>
-                          {excelGridData.rows.map(row => (
-                            <tr 
-                              key={row.rowNumber} 
-                              style={{ height: row.height ? `${Math.round(row.height * 0.96)}px` : undefined }}
-                            >
-                              {row.cells.map(cell => {
-                                if (cell.isMergedChild) return null;
-
-                                return (
-                                  <td
-                                    key={cell.address}
-                                    colSpan={cell.colSpan || 1}
-                                    rowSpan={cell.rowSpan || 1}
-                                    style={{
-                                      backgroundColor: cell.bgColor || undefined,
-                                      color: cell.fontColor || '#0f172a',
-                                      textAlign: cell.align || 'left',
-                                      verticalAlign: cell.verticalAlign || 'middle',
-                                      fontWeight: cell.isBold ? 700 : 400,
-                                      fontSize: cell.fontSize ? `${Math.max(8.5, Math.min(cell.fontSize, 15))}px` : '9.5px',
-                                      borderTop: cell.borderTopStyle || (cell.borderTop ? '1px solid #475569' : undefined),
-                                      borderBottom: cell.borderBottomStyle || (cell.borderBottom ? '1px solid #475569' : undefined),
-                                      borderLeft: cell.borderLeftStyle || (cell.borderLeft ? '1px solid #475569' : undefined),
-                                      borderRight: cell.borderRightStyle || (cell.borderRight ? '1px solid #475569' : undefined),
-                                      border: (!cell.borderTopStyle && !cell.borderBottomStyle && !cell.borderLeftStyle && !cell.borderRightStyle && cell.hasBorder) ? '1px solid #475569' : undefined,
-                                      padding: '3px 5px',
-                                      wordBreak: 'break-word',
-                                      lineHeight: 1.25,
-                                      whiteSpace: 'pre-wrap',
-                                    }}
-                                  >
-                                    {cell.value || ''}
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div className="h-96 flex flex-col items-center justify-center text-slate-400 space-y-2">
-                      <RefreshCw className="w-8 h-8 animate-spin text-indigo-600" />
-                      <p className="text-xs font-semibold text-slate-600">テンプレート原本を解析・変換中...</p>
-                      <p className="text-[11px] text-slate-400">マッピング定義に基づきExcelシートをPDF帳票へレンダリングしています</p>
-                    </div>
-                  )}
-
-                  {/* Document Print Footer */}
-                  <div className="mt-4 pt-2 border-t border-slate-200 flex items-center justify-between text-[9px] text-slate-400 font-mono">
-                    <span>※ 本書は登録テンプレート原本（.xlsx）より変換・自動生成された正式調達仕様書です。</span>
-                    <span>DocID: {formValues['f-docno'] || fixedDocNo} | 発行日: {formValues['f-date'] || new Date().toISOString().slice(0, 10)}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Status bar below PDF */}
-              <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-500 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                  <span>マッピングや入力値を更新した後、右上の「再読み込み」を押すと最新のプレビューが反映されます。</span>
-                </div>
-                <div className="font-mono text-indigo-700 font-semibold">
-                  Doc No: {fixedDocNo}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* VIEW MODE 2: EXCEL ORIGINAL LIVE GRID */}
-          {previewMode === 'excel' && (
-            <div className="space-y-2 pb-4">
+          {/* EXCEL ORIGINAL LIVE GRID */}
+          <div className="space-y-2 pb-4">
               <div className="bg-white border border-slate-300 shadow-md rounded-xl overflow-hidden transition-all select-none">
                 
                 {/* Sheet Tabs Bar & In-Frame Zoom Toolbar */}
@@ -1555,23 +1307,6 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                       </div>
                     )}
 
-                    {/* Quick Preset Buttons */}
-                    <div className="hidden sm:flex items-center gap-1 text-[10px]">
-                      {[75, 100, 125].map(preset => (
-                        <button
-                          key={preset}
-                          type="button"
-                          onClick={() => setPreviewZoom(preset)}
-                          className={`px-2 py-0.5 rounded font-mono font-bold cursor-pointer transition-colors ${
-                            previewZoom === preset 
-                              ? 'bg-slate-800 text-white shadow-2xs' 
-                              : 'bg-white text-slate-600 hover:bg-slate-200 border border-slate-300'
-                          }`}
-                        >
-                          {preset}%
-                        </button>
-                      ))}
-                    </div>
 
                     {/* Stepper with Zoom In / Out */}
                     <div className="flex items-center bg-white border border-slate-300 rounded-lg p-0.5 shadow-2xs">
@@ -1798,7 +1533,6 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                 </div>
               </div>
             </div>
-          )}
         </div>
       </div>
     </div>
