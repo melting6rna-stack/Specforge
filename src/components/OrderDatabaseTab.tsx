@@ -791,10 +791,10 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
           {/* Clean High-Legibility Table without Traceability Clutter */}
           <div className="bg-white border border-slate-200 rounded-xl shadow-2xs overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
+              <table className="w-full min-w-[1750px] text-left text-xs border-collapse">
                 <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 select-none">
                   <tr>
-                    <th className="py-2.5 px-3 w-8 text-center">
+                    <th className="py-2.5 px-3 w-9 min-w-[36px] text-center">
                       <button
                         type="button"
                         onClick={handleToggleSelectAll}
@@ -810,14 +810,14 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                         )}
                       </button>
                     </th>
-                    <th className="py-2.5 px-1.5 w-6 text-center" title="ドラッグ＆ドロップで行順の入替またはカテゴリ移動"></th>
+                    <th className="py-2.5 px-1.5 w-7 min-w-[28px] text-center" title="ドラッグ＆ドロップで行順の入替またはカテゴリ移動"></th>
                     
                     {/* 機器種別 (アルファベット2文字) */}
-                    <th className="py-2.5 px-3 whitespace-nowrap">機器種別</th>
+                    <th className="py-2.5 px-3 min-w-[80px] text-center whitespace-nowrap">機器種別</th>
 
                     {/* 機器番号 (クリックでソート切り替え) */}
                     <th 
-                      className="py-2.5 px-3 whitespace-nowrap cursor-pointer hover:text-indigo-600 transition-colors"
+                      className="py-2.5 px-3 min-w-[120px] whitespace-nowrap cursor-pointer hover:text-indigo-600 transition-colors"
                       onClick={() => handleToggleSort('tagNo')}
                       title="クリックして機器番号順でソート"
                     >
@@ -831,15 +831,15 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                       </div>
                     </th>
 
-                    <th className="py-2.5 px-3 whitespace-nowrap">機器名</th>
-                    <th className="py-2.5 px-3">機器仕様 (口径・出力等)</th>
-                    <th className="py-2.5 px-3 whitespace-nowrap">主要材質</th>
-                    <th className="py-2.5 px-3 whitespace-nowrap">付属品・予備品</th>
-                    <th className="py-2.5 px-3 text-right whitespace-nowrap">数量</th>
+                    <th className="py-2.5 px-3 min-w-[220px]">機器名</th>
+                    <th className="py-2.5 px-3 min-w-[320px]">機器仕様 (口径・出力等)</th>
+                    <th className="py-2.5 px-3 min-w-[280px]">主要材質</th>
+                    <th className="py-2.5 px-3 min-w-[320px]">付属品・予備品</th>
+                    <th className="py-2.5 px-3 min-w-[90px] text-right whitespace-nowrap">数量</th>
 
                     {/* 納入時期 (クリックでソート切り替え) */}
                     <th 
-                      className="py-2.5 px-3 whitespace-nowrap cursor-pointer hover:text-indigo-600 transition-colors"
+                      className="py-2.5 px-3 min-w-[130px] whitespace-nowrap cursor-pointer hover:text-indigo-600 transition-colors"
                       onClick={() => handleToggleSort('deliveryDate')}
                       title="クリックして納期順でソート"
                     >
@@ -854,12 +854,12 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                     </th>
 
                     {/* 発行欄 (納入時期のすぐ右側・未か済で表記) */}
-                    <th className="py-2.5 px-3 whitespace-nowrap text-center w-14">
+                    <th className="py-2.5 px-3 min-w-[70px] whitespace-nowrap text-center">
                       発行
                     </th>
 
                     {/* 操作欄 (シンプルな編集・削除アイコン) */}
-                    <th className="py-2.5 px-3 text-right whitespace-nowrap w-16">
+                    <th className="py-2.5 px-3 min-w-[80px] text-right whitespace-nowrap">
                     </th>
                   </tr>
                 </thead>
@@ -920,29 +920,30 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                           </td>
 
                           {/* 機器種別 (囲みなしプレーン文字列) */}
-                          <td className="py-3 px-3 font-mono font-bold text-slate-700 whitespace-nowrap">
+                          <td className="py-3 px-3 min-w-[80px] font-mono font-bold text-slate-700 whitespace-nowrap text-center">
                             {item.equipmentType ? item.equipmentType.toUpperCase() : '-'}
                           </td>
 
                           {/* 機器番号 (購入品・製作品マークなしプレーン表示) */}
-                          <td className="py-3 px-3 font-mono font-bold text-slate-800 whitespace-nowrap">
+                          <td className="py-3 px-3 min-w-[120px] font-mono font-bold text-slate-800 whitespace-nowrap">
                             {item.tagNo || '-'}
                           </td>
 
-                          <td className="py-3 px-3">
-                            <div className="font-semibold text-slate-900 group-hover:text-indigo-600 transition-colors">
+                          {/* 機器名 */}
+                          <td className="py-3 px-3 min-w-[220px]">
+                            <div className="font-semibold text-slate-900 group-hover:text-indigo-600 transition-colors leading-snug">
                               {item.name}
                             </div>
                           </td>
 
                           {/* Dynamic specifications display */}
-                          <td className="py-2.5 px-3">
+                          <td className="py-2.5 px-3 min-w-[320px]">
                             {hasSpecs ? (
-                              <div className="flex flex-wrap gap-1">
+                              <div className="flex flex-wrap gap-1.5">
                                 {item.specs!.map((s) => (
                                   <span
                                     key={s.id}
-                                    className="inline-flex items-center gap-1 bg-slate-100/90 text-slate-800 px-1.5 py-0.5 rounded text-[11px] font-mono border border-slate-200/60"
+                                    className="inline-flex items-center gap-1 bg-slate-100/90 text-slate-800 px-2 py-0.5 rounded text-[11px] font-mono border border-slate-200/60"
                                   >
                                     <span className="text-slate-500 font-sans">{s.name}:</span>
                                     <span className="font-semibold text-slate-900">{s.value}</span>
@@ -951,14 +952,14 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                                 ))}
                               </div>
                             ) : (
-                              <div className="flex flex-wrap gap-1 font-mono text-[11px]">
+                              <div className="flex flex-wrap gap-1.5 font-mono text-[11px]">
                                 {item.diameter && item.diameter !== '-' && (
-                                  <span className="bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded border border-slate-200/60">
+                                  <span className="bg-slate-100 text-slate-800 px-2 py-0.5 rounded border border-slate-200/60">
                                     <span className="text-slate-500 font-sans">口径:</span> {item.diameter}
                                   </span>
                                 )}
                                 {item.material && item.material !== '-' && (
-                                  <span className="bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded border border-slate-200/60">
+                                  <span className="bg-slate-100 text-slate-800 px-2 py-0.5 rounded border border-slate-200/60">
                                     <span className="text-slate-500 font-sans">材質:</span> {item.material}
                                   </span>
                                 )}
@@ -969,16 +970,16 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                             )}
                           </td>
 
-                          {/* 主要材質 (materials) */}
-                          <td className="py-2.5 px-3">
+                          {/* 主要材質 (materials) - 十分な幅を確保し全文表示 */}
+                          <td className="py-2.5 px-3 min-w-[280px]">
                             {item.materials && item.materials.length > 0 ? (
-                              <div className="flex flex-col gap-1 max-w-[200px]">
+                              <div className="flex flex-col gap-1.5">
                                 {item.materials.map((m, mIdx) => (
-                                  <div key={mIdx} className="text-[11px] leading-tight flex items-baseline gap-1" title={m.condition || m.note || undefined}>
-                                    <span className="text-slate-500 font-sans text-[10px] shrink-0 font-medium">{m.part}:</span>
+                                  <div key={mIdx} className="text-[11px] leading-tight flex items-baseline gap-1.5">
+                                    <span className="text-slate-500 font-sans text-[11px] shrink-0 font-medium">{m.part}:</span>
                                     <span className="font-mono font-semibold text-slate-800">{m.value || '-'}</span>
                                     {m.condition && (
-                                      <span className="text-[9px] text-slate-400 font-mono">({m.condition})</span>
+                                      <span className="text-[10px] text-slate-400 font-mono">({m.condition})</span>
                                     )}
                                   </div>
                                 ))}
@@ -990,20 +991,20 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                             )}
                           </td>
 
-                          {/* 付属品・予備品 (accessories) */}
-                          <td className="py-2.5 px-3">
+                          {/* 付属品・予備品 (accessories) - 切り捨て(truncate)を廃止し数量・備考を完全表示 */}
+                          <td className="py-2.5 px-3 min-w-[220px]">
                             {item.accessories && item.accessories.length > 0 ? (
-                              <div className="flex flex-col gap-1 max-w-[200px]">
+                              <div className="flex flex-col gap-1.5">
                                 {item.accessories.map((a, aIdx) => (
-                                  <div key={aIdx} className="text-[11px] leading-tight flex items-baseline gap-1" title={a.note || undefined}>
+                                  <div key={aIdx} className="text-[11px] leading-snug flex items-baseline flex-wrap gap-1.5">
                                     <span className="text-slate-800 font-medium">{a.name}</span>
                                     {(a.quantity !== null && a.quantity !== undefined) && (
-                                      <span className="font-mono text-slate-500 text-[10px] shrink-0">
+                                      <span className="font-mono text-slate-600 text-[10px] shrink-0 font-semibold">
                                         ×{a.quantity}{a.unit || ''}
                                       </span>
                                     )}
                                     {a.note && (
-                                      <span className="text-[9px] text-slate-400 font-sans truncate max-w-[90px]" title={a.note}>
+                                      <span className="text-[10px] text-slate-500 font-sans">
                                         ({a.note})
                                       </span>
                                     )}
@@ -1015,14 +1016,15 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                             )}
                           </td>
 
-                          <td className="py-3 px-3 text-right font-mono tabular-nums whitespace-nowrap">
+                          {/* 数量 */}
+                          <td className="py-3 px-3 min-w-[90px] text-right font-mono tabular-nums whitespace-nowrap">
                             <span className="font-bold text-slate-900">{item.quantity}</span>
                             <span className="text-slate-500 ml-1">{item.unit || '台'}</span>
                           </td>
 
                           {/* 納入時期 (Clickable to edit delivery date) */}
                           <td
-                            className="py-3 px-3 font-mono whitespace-nowrap group/deliv cursor-pointer hover:bg-indigo-50/80 transition-colors"
+                            className="py-3 px-3 min-w-[130px] font-mono whitespace-nowrap group/deliv cursor-pointer hover:bg-indigo-50/80 transition-colors"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleOpenDeliveryEditor(item.id);
@@ -1042,14 +1044,14 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                           </td>
 
                           {/* 発行 (表示専用: 文字列のみ・済の行は背景色30%グレー) */}
-                          <td className="py-2.5 px-3 text-center whitespace-nowrap select-none text-xs">
+                          <td className="py-2.5 px-3 min-w-[70px] text-center whitespace-nowrap select-none text-xs">
                             <span className={item.isIssued ? 'font-bold text-slate-800' : 'text-slate-400 font-medium'}>
                               {item.isIssued ? '済' : '未'}
                             </span>
                           </td>
 
                           {/* 以前のシンプルな編集・削除ボタン */}
-                          <td className="py-2.5 px-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                          <td className="py-2.5 px-3 min-w-[80px] text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-end gap-1">
                               <button
                                 type="button"
