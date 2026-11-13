@@ -12,7 +12,6 @@ import {
   FileText, 
   ShieldCheck,
   AlertCircle,
-  Table,
   Target,
   FileCheck2,
   Copy,
@@ -23,8 +22,9 @@ import {
   ArrowRight,
   HardDrive
 } from 'lucide-react';
-import { SpecTemplate, SpecFieldMapping, TableColumnMapping, SpecMappingAssetFile, EquipmentItem, ProjectWorkspace } from '../types';
+import { SpecTemplate, SpecFieldMapping, SpecMappingAssetFile, EquipmentItem, ProjectWorkspace } from '../types';
 import { exportMappingAssetAsJson, importMappingAssetFromJson, createDefaultMasterWorkbook } from '../utils/exceljsEngine';
+import { normalizeSpecTemplate } from '../utils/templateUtils';
 
 interface TemplateAdminTabProps {
   templates: SpecTemplate[];
@@ -97,38 +97,8 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
 
   // Start editing a template
   const handleStartEdit = (tpl: SpecTemplate) => {
-    const clone: SpecTemplate = JSON.parse(JSON.stringify(tpl));
+    const clone: SpecTemplate = normalizeSpecTemplate(JSON.parse(JSON.stringify(tpl)));
     if (!clone.fields) clone.fields = [];
-    
-    // Ensure baseline basic fields exist if missing
-    const hasBasic = (clone.fields || []).some(f => f.group === 'basic');
-    if (!hasBasic) {
-      const defaultBasics: SpecFieldMapping[] = [
-        { id: `f-basic-title`, label: '案件名', cell: 'C5', type: 'text', group: 'basic', defaultValue: '設備工事' },
-        { id: `f-basic-code`, label: '案件コード', cell: 'C4', type: 'text', group: 'basic', defaultValue: currentProject?.code || 'PRJ-2026-01' },
-        { id: `f-basic-order`, label: 'オーダーNo.', cell: 'C3', type: 'text', group: 'basic', defaultValue: currentProject?.orderNo || '202500444' },
-        { id: `f-basic-client`, label: '客先名', cell: 'G6', type: 'text', group: 'basic', defaultValue: currentProject?.clientName || '〇〇市水道局' },
-        { id: `f-basic-docno`, label: '仕様書番号', cell: 'C4', type: 'text', group: 'basic', defaultValue: 'SPEC-2026-001' },
-        { id: `f-basic-date`, label: '発行日', cell: 'G4', type: 'date', group: 'basic', defaultValue: new Date().toISOString().slice(0, 10) },
-        { id: `f-basic-issuer`, label: '発行元', cell: 'G5', type: 'text', group: 'basic', defaultValue: '設計部' },
-        { id: `f-basic-notes`, label: '特記事項', cell: 'B23', type: 'textarea', group: 'notes', defaultValue: '特記事項なし。' }
-      ];
-      clone.fields = [...defaultBasics, ...(clone.fields || [])];
-    }
-
-    if (!clone.tableMapping) {
-      clone.tableMapping = {
-        startRow: 15,
-        targetSheetName: '仕様書',
-        tagNoCol: 'B',
-        nameCol: 'C',
-        diameterCol: 'D',
-        materialCol: 'E',
-        quantityCol: 'F',
-        deliveryDateCol: 'G',
-        notesCol: 'H'
-      };
-    }
     setEditingTemplate(clone);
     setIsEditing(true);
   };
@@ -136,47 +106,41 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
   // Save template modifications
   const handleSaveEdit = () => {
     if (!editingTemplate) return;
-    const updated = templates.map(t => t.id === editingTemplate.id ? { ...editingTemplate, updatedAt: new Date().toISOString().slice(0, 10) } : t);
+    const cleanName = editingTemplate.name.trim() || '無題のテンプレート';
+    const cleanedTpl = normalizeSpecTemplate({
+      ...editingTemplate,
+      name: cleanName,
+      updatedAt: new Date().toISOString().slice(0, 10)
+    });
+    const updated = templates.map(t => t.id === cleanedTpl.id ? cleanedTpl : t);
     onUpdateTemplates(updated);
     setIsEditing(false);
-    setMessage(`テンプレート「${editingTemplate.name}」の設定とマッピングを保存しました。`);
+    setEditingTemplate(null);
+    setMessage(`テンプレート「${cleanedTpl.name}」の設定とマッピングを保存しました。`);
     setTimeout(() => setMessage(''), 4000);
   };
 
   // Create new template
   const handleCreateNewTemplate = () => {
     const newId = `tpl-custom-${Date.now()}`;
-    const newTemplate: SpecTemplate = {
+    const newTemplate: SpecTemplate = normalizeSpecTemplate({
       id: newId,
       code: `SPEC-CUSTOM-${Math.floor(100 + Math.random() * 900)}`,
       name: '新規仕様書 テンプレート',
       description: 'セル番地マッピングおよびチェック項目を定義した新規仕様書',
-      columns: ['機器番号', '機器名', '仕様', '数量', '納期'],
+      columns: ['機器名', '数量', '納期', '特記事項'],
       inspectionStandard: '受入検査を実施すること。',
       warrantyPeriod: '引渡日より1年間。',
       deliveryTerms: '車上渡し。',
       notesTemplate: '特記事項なし。',
       sourceType: 'custom_excel',
       fields: [
-        { id: `f-${Date.now()}-1`, label: '仕様書標題', cell: 'B2', type: 'text', group: 'basic', defaultValue: '【 新規仕様書 】' },
-        { id: `f-${Date.now()}-2`, label: '工事・件名', cell: 'C5', type: 'text', group: 'basic', defaultValue: '設備工事' },
         { id: `f-${Date.now()}-3`, label: '耐圧検査成績書提出', cell: 'C8', type: 'checkbox', group: 'check', defaultValue: true, checkboxConfig: { checkedValue: '☑ 要', uncheckedValue: '☐ 不要', labelTrue: '要', labelFalse: '不要' } },
         { id: `f-${Date.now()}-4`, label: '塗装仕様', cell: 'C9', type: 'select', group: 'spec', options: ['標準防錆塗装', 'エポキシ樹脂塗装', '無塗装'], defaultValue: '標準防錆塗装' },
         { id: `f-${Date.now()}-5`, label: '特記事項', cell: 'B23', type: 'textarea', group: 'notes', defaultValue: '特記事項なし。' }
       ],
-      tableMapping: {
-        startRow: 15,
-        targetSheetName: '仕様書',
-        tagNoCol: 'B',
-        nameCol: 'C',
-        diameterCol: 'D',
-        materialCol: 'E',
-        quantityCol: 'F',
-        deliveryDateCol: 'G',
-        notesCol: 'H'
-      },
       updatedAt: new Date().toISOString().slice(0, 10)
-    };
+    });
 
     onUpdateTemplates([newTemplate, ...templates]);
     setSelectedTemplateId(newId);
@@ -268,13 +232,13 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
         const jsonStr = evt.target?.result as string;
         const asset: SpecMappingAssetFile = importMappingAssetFromJson(jsonStr);
 
-        const newTemplate: SpecTemplate = {
+        const newTemplate: SpecTemplate = normalizeSpecTemplate({
           id: asset.templateId || `tpl-${Date.now()}`,
           code: asset.templateCode || 'SPEC-IMPORTED',
           name: asset.templateName || file.name.replace('.specmap.json', ''),
           description: asset.description || '外部からインポートされたマッピング定義仕様書',
           targetCategoryName: asset.targetCategoryName || '汎用',
-          columns: ['機器番号', '機器名', '仕様', '材質', '数量', '納期', '特記事項'],
+          columns: ['機器名', '数量', '納期', '特記事項'],
           inspectionStandard: '基準に準拠。',
           warrantyPeriod: '1年間。',
           deliveryTerms: '車上渡し。',
@@ -286,7 +250,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
           masterWorkbookBase64: asset.masterWorkbookBase64,
           rawWorkbookBase64: asset.masterWorkbookBase64,
           updatedAt: new Date().toISOString().slice(0, 10)
-        };
+        });
 
         const existingIndex = templates.findIndex(t => t.id === newTemplate.id);
         let nextTemplates: SpecTemplate[];
@@ -367,21 +331,6 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
     });
   };
 
-  const handleAddBasicField = () => {
-    if (!editingTemplate) return;
-    const newField: SpecFieldMapping = {
-      id: `f-basic-${Date.now()}`,
-      label: '案件名',
-      cell: 'C5',
-      type: 'text',
-      group: 'basic',
-      defaultValue: ''
-    };
-    setEditingTemplate({
-      ...editingTemplate,
-      fields: [...(editingTemplate.fields || []), newField]
-    });
-  };
 
   const handleUpdateField = (fieldId: string, patch: Partial<SpecFieldMapping>) => {
     if (!editingTemplate) return;
@@ -399,10 +348,17 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
     });
   };
 
-  const activeTpl = isEditing ? editingTemplate! : currentTemplate;
+  const rawActiveTpl = isEditing && editingTemplate ? editingTemplate : currentTemplate;
+  const activeTpl = React.useMemo(() => normalizeSpecTemplate(rawActiveTpl), [rawActiveTpl]);
+
+  const detailFields = React.useMemo(() => {
+    return (activeTpl.fields || []).filter(f => f.group === 'detail');
+  }, [activeTpl.fields]);
 
   const specFields = React.useMemo(() => {
-    return (activeTpl.fields || []).filter(f => f.type !== 'checkbox' && f.group !== 'basic');
+    return (activeTpl.fields || []).filter(
+      f => f.type !== 'checkbox' && f.group !== 'basic' && f.group !== 'detail'
+    );
   }, [activeTpl.fields]);
 
   const checkboxFields = React.useMemo(() => {
@@ -516,7 +472,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                     <div className="text-[10px] text-slate-500 font-normal mt-1 flex items-center gap-1.5">
                       <span>項目: {tpl.fields?.length || 0}個</span>
                       <span>•</span>
-                      <span>明細行: {tpl.tableMapping?.startRow || 15}行目〜</span>
+                      <span>更新: {tpl.updatedAt}</span>
                     </div>
                   </div>
                 );
@@ -531,16 +487,38 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
           {/* Header Card for Selected Template */}
           <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold text-slate-900">{activeTpl.name}</span>
-                  <span className="text-xs font-mono bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
-                    {activeTpl.code}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 mt-1">
-                  {activeTpl.description}
-                </p>
+              <div className="flex-1 min-w-0">
+                {isEditing ? (
+                  <div className="space-y-1.5 max-w-xl">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={editingTemplate?.name ?? ''}
+                        onChange={(e) => setEditingTemplate(prev => prev ? { ...prev, name: e.target.value } : prev)}
+                        placeholder="仕様書のテンプレート名を入力..."
+                        className="flex-1 min-w-0 text-sm font-bold text-slate-900 bg-white border border-indigo-300 rounded-md px-2.5 py-1 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                      />
+                      <span className="text-xs font-mono bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200 shrink-0">
+                        {activeTpl.code}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 truncate">
+                      {activeTpl.description}
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-slate-900">{activeTpl.name}</span>
+                      <span className="text-xs font-mono bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
+                        {activeTpl.code}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {activeTpl.description}
+                    </p>
+                  </>
+                )}
               </div>
 
               <div className="flex items-center gap-2">
@@ -665,177 +643,23 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
           {activeTabSub === 'fields' && (
             <div className="space-y-4">
 
-              {/* Integrated Section 1: 対象機器 明細テーブル セル番地マッピング */}
+              {/* Unified Continuous Section: 明細基本情報（固定4項目）＋ 可変仕様項目 セル番地マッピング */}
               <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2">
                   <div>
                     <h2 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                      <Table className="w-4 h-4 text-indigo-600" />
-                      <span>対象機器 明細テーブル セル番地マッピング</span>
-                    </h2>
-                    <p className="text-[11px] text-slate-500">
-                      案件に含まれる機器リスト（機器番号、機器名、仕様、材質、数量、納期）を流し込むExcel原本の列と各行のセル番地です。
-                    </p>
-                  </div>
-
-                  {/* Settings toolbar: Target Sheet, Start Row */}
-                  <div className="flex items-center gap-2 flex-wrap text-xs bg-slate-50 p-1.5 rounded-lg border border-slate-200">
-                    <div className="flex items-center gap-1">
-                      <span className="text-[11px] text-slate-500 font-medium">対象シート:</span>
-                      <input
-                        type="text"
-                        disabled={!isEditing}
-                        value={activeTpl.tableMapping?.targetSheetName || '仕様書'}
-                        onChange={(e) => {
-                          if (editingTemplate) {
-                            setEditingTemplate({
-                              ...editingTemplate,
-                              tableMapping: {
-                                ...editingTemplate.tableMapping!,
-                                targetSheetName: e.target.value
-                              }
-                            });
-                          }
-                        }}
-                        className="w-20 text-[11px] bg-white border border-slate-300 rounded px-1.5 py-0.5 font-mono disabled:opacity-75"
-                        placeholder="仕様書"
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-1">
-                      <span className="text-[11px] text-slate-500 font-medium">開始行:</span>
-                      <input
-                        type="number"
-                        disabled={!isEditing}
-                        value={activeTpl.tableMapping?.startRow || 15}
-                        onChange={(e) => {
-                          const newRow = parseInt(e.target.value, 10) || 15;
-                          if (editingTemplate) {
-                            setEditingTemplate({
-                              ...editingTemplate,
-                              tableMapping: {
-                                ...editingTemplate.tableMapping!,
-                                startRow: newRow
-                              }
-                            });
-                          }
-                        }}
-                        className="w-14 text-[11px] bg-white border border-slate-300 rounded px-1.5 py-0.5 font-mono text-center font-bold disabled:opacity-75"
-                      />
-                      <span className="text-[11px] text-slate-400">行目〜</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
-                      <tr>
-                        <th className="p-2 w-36">明細項目名</th>
-                        <th className="p-2 w-16 text-center">列</th>
-                        <th className="p-2 w-28 bg-indigo-50/60 font-bold text-indigo-900">1行目 (1台目)</th>
-                        <th className="p-2 w-24">2行目 (2台目)</th>
-                        <th className="p-2 w-24">3行目 (3台目)</th>
-                        <th className="p-2 w-24">4行目 (4台目)</th>
-                        <th className="p-2">転記元データ / 説明</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {[
-                        { key: 'tagNoCol', label: '機器番号', defaultCol: 'B', desc: '機器タグ番号 (例: V-101, P-101)' },
-                        { key: 'nameCol', label: '機器名', defaultCol: 'C', desc: '機器名称 (例: ポールユニット, 渦巻ポンプ)' },
-                        { key: 'diameterCol', label: '口径・主要仕様', defaultCol: 'D', desc: '口径や主要仕様パラメータ (例: 50A 10K)' },
-                        { key: 'materialCol', label: '主要材質', defaultCol: 'E', desc: '材質 (例: SCS13A, SUS304)' },
-                        { key: 'quantityCol', label: '数量', defaultCol: 'F', desc: '発注数量・単位 (例: 4台)' },
-                        { key: 'deliveryDateCol', label: '納期', defaultCol: 'G', desc: '納入指定時期 (例: 2026/09/15)' },
-                        { key: 'notesCol', label: '特記事項・備考', defaultCol: 'H', desc: '機器個別備考・特記事項' },
-                      ].map(item => {
-                        const colLetter = (activeTpl.tableMapping as any)?.[item.key] || item.defaultCol;
-                        const startRow = activeTpl.tableMapping?.startRow || 15;
-                        const slot1 = `${colLetter}${startRow}`;
-                        const slot2 = `${colLetter}${startRow + 1}`;
-                        const slot3 = `${colLetter}${startRow + 2}`;
-                        const slot4 = `${colLetter}${startRow + 3}`;
-
-                        return (
-                          <tr key={item.key} className="hover:bg-slate-50/60 transition-colors">
-                            <td className="p-2 font-bold text-slate-800 flex items-center gap-1.5">
-                              <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
-                              <span>{item.label}</span>
-                            </td>
-                            <td className="p-2 text-center">
-                              {isEditing ? (
-                                <input
-                                  type="text"
-                                  value={colLetter}
-                                  onChange={(e) => {
-                                    if (editingTemplate) {
-                                      setEditingTemplate({
-                                        ...editingTemplate,
-                                        tableMapping: {
-                                          ...editingTemplate.tableMapping!,
-                                          [item.key]: e.target.value.toUpperCase()
-                                        }
-                                      });
-                                    }
-                                  }}
-                                  className="w-10 text-xs font-mono font-bold text-center bg-white border border-slate-300 rounded p-1 uppercase"
-                                  title="列アルファベットを変更"
-                                />
-                              ) : (
-                                <span className="font-mono font-bold bg-slate-100 text-slate-800 px-2 py-0.5 rounded text-[11px] border border-slate-200">
-                                  {colLetter}列
-                                </span>
-                              )}
-                            </td>
-                            <td className="p-2 bg-indigo-50/30">
-                              <span className="font-mono font-bold text-indigo-700 bg-indigo-100/70 border border-indigo-200 px-2 py-0.5 rounded text-xs">
-                                {slot1}
-                              </span>
-                            </td>
-                            <td className="p-2">
-                              <span className="font-mono text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-xs">
-                                {slot2}
-                              </span>
-                            </td>
-                            <td className="p-2">
-                              <span className="font-mono text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-xs">
-                                {slot3}
-                              </span>
-                            </td>
-                            <td className="p-2">
-                              <span className="font-mono text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-xs">
-                                {slot4}
-                              </span>
-                            </td>
-                            <td className="p-2 text-[11px] text-slate-500">
-                              {item.desc}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Section 2: Specification fields */}
-              <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                  <div>
-                    <h2 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
                       <Target className="w-4 h-4 text-indigo-600" />
-                      <span>機器仕様項目 セル番地マッピング ({specFields.length}項目)</span>
+                      <span>セル番地マッピング（明細基本情報・可変仕様項目）</span>
                     </h2>
                     <p className="text-[11px] text-slate-500">
-                      機器データベースに登録されている仕様項目名（口径、材質、圧力等）をプルダウンで選択し、Excel原本の転記先セル番地を指定します。
+                      上段に明細の基本情報（機器名・数量・納期・特記事項）、下段に可変の仕様項目（口径・材質・塗装等）の転記先セル番地を個別指定します。
                     </p>
                   </div>
 
                   {isEditing && (
                     <button
                       onClick={handleAddSpecField}
-                      className="px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md shadow-xs flex items-center gap-1 transition-all cursor-pointer"
+                      className="px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md shadow-xs flex items-center gap-1 transition-all cursor-pointer shrink-0"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>仕様項目を追加</span>
@@ -847,8 +671,8 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                   <table className="w-full text-left text-xs border-collapse">
                     <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
                       <tr>
-                        <th className="p-2 w-48">項目ラベル (仕様項目)</th>
-                        <th className="p-2 w-24">1種類目 (メイン)</th>
+                        <th className="p-2 w-48">項目名</th>
+                        <th className="p-2 w-24 bg-indigo-50/60 text-indigo-950 font-bold">1種類目 (メイン)</th>
                         <th className="p-2 w-24">2種類目</th>
                         <th className="p-2 w-24">3種類目</th>
                         <th className="p-2 w-24">4種類目</th>
@@ -857,6 +681,105 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
+                      {/* 上段: 明細の基本情報のマッピング（固定4項目: 機器名・数量・納期・特記事項） */}
+                      <tr className="bg-slate-100/70">
+                        <td colSpan={isEditing ? 7 : 6} className="px-2.5 py-1.5 text-[11px] font-bold text-slate-700">
+                          明細の基本情報（機器名・数量・納期・特記事項）
+                        </td>
+                      </tr>
+                      {detailFields.map((field) => {
+                        if (!isEditing) {
+                          return (
+                            <tr key={field.id} className="hover:bg-slate-50/70">
+                              <td className="p-2 font-bold text-slate-900">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 shrink-0" />
+                                  <span>{field.label}</span>
+                                </div>
+                              </td>
+                              <td className="p-2 font-mono font-bold text-indigo-700 bg-indigo-50/20">
+                                {field.cell || '-'}
+                              </td>
+                              <td className="p-2 font-mono text-slate-700">
+                                {field.cellSlot2 || '-'}
+                              </td>
+                              <td className="p-2 font-mono text-slate-700">
+                                {field.cellSlot3 || '-'}
+                              </td>
+                              <td className="p-2 font-mono text-slate-700">
+                                {field.cellSlot4 || '-'}
+                              </td>
+                              <td className="p-2 text-[11px] text-slate-500">
+                                {field.description || '-'}
+                              </td>
+                            </tr>
+                          );
+                        }
+
+                        return (
+                          <tr key={field.id} className="bg-slate-50/40 hover:bg-indigo-50/20">
+                            <td className="p-2 font-bold text-slate-900">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 shrink-0" />
+                                <span>{field.label}</span>
+                              </div>
+                            </td>
+                            <td className="p-2 bg-indigo-50/20">
+                              <input
+                                type="text"
+                                value={field.cell || ''}
+                                onChange={(e) => handleUpdateField(field.id, { cell: e.target.value.toUpperCase() })}
+                                className="w-full text-xs font-mono font-bold bg-white border border-indigo-300 rounded px-2 py-1 text-indigo-800 placeholder-slate-300"
+                                placeholder="C15"
+                                title="1種類目のセル番地"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                value={field.cellSlot2 || ''}
+                                onChange={(e) => handleUpdateField(field.id, { cellSlot2: e.target.value.toUpperCase() })}
+                                className="w-full text-xs font-mono bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 placeholder-slate-300"
+                                placeholder="C16"
+                                title="2種類目のセル番地"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                value={field.cellSlot3 || ''}
+                                onChange={(e) => handleUpdateField(field.id, { cellSlot3: e.target.value.toUpperCase() })}
+                                className="w-full text-xs font-mono bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 placeholder-slate-300"
+                                placeholder="C17"
+                                title="3種類目のセル番地"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                value={field.cellSlot4 || ''}
+                                onChange={(e) => handleUpdateField(field.id, { cellSlot4: e.target.value.toUpperCase() })}
+                                className="w-full text-xs font-mono bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 placeholder-slate-300"
+                                placeholder="C18"
+                                title="4種類目のセル番地"
+                              />
+                            </td>
+                            <td className="p-2 text-[11px] text-slate-500">
+                              {field.description || '-'}
+                            </td>
+                            <td className="p-2 text-right">
+                              <span className="text-[10px] text-slate-400 font-mono">固定</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+
+                      {/* 下段: 可変の項目マッピング（仕様項目） */}
+                      <tr className="bg-indigo-50/40 border-t border-slate-200">
+                        <td colSpan={isEditing ? 7 : 6} className="px-2.5 py-1.5 text-[11px] font-bold text-indigo-900">
+                          可変の仕様項目（口径・材質・塗装仕様など）
+                        </td>
+                      </tr>
                       {specFields.map((field) => {
                         if (!isEditing) {
                           return (
@@ -864,7 +787,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                               <td className="p-2 font-semibold text-slate-900">
                                 {field.label}
                               </td>
-                              <td className="p-2 font-mono font-bold text-indigo-700">
+                              <td className="p-2 font-mono font-bold text-indigo-700 bg-indigo-50/20">
                                 {field.cell || '-'}
                               </td>
                               <td className="p-2 font-mono text-slate-700">
@@ -901,13 +824,13 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                               </select>
                             </td>
                             {/* 1種類目 */}
-                            <td className="p-2">
+                            <td className="p-2 bg-indigo-50/20">
                               <input
                                 type="text"
                                 value={field.cell || ''}
                                 onChange={(e) => handleUpdateField(field.id, { cell: e.target.value.toUpperCase() })}
                                 className="w-full text-xs font-mono font-bold bg-white border border-indigo-300 rounded px-2 py-1 text-indigo-800 placeholder-slate-300"
-                                placeholder="C15"
+                                placeholder="D15"
                                 title="1種類目のセル番地"
                               />
                             </td>
@@ -918,7 +841,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                                 value={field.cellSlot2 || ''}
                                 onChange={(e) => handleUpdateField(field.id, { cellSlot2: e.target.value.toUpperCase() })}
                                 className="w-full text-xs font-mono bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 placeholder-slate-300"
-                                placeholder="D15"
+                                placeholder="D16"
                                 title="2種類目のセル番地"
                               />
                             </td>
@@ -929,7 +852,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                                 value={field.cellSlot3 || ''}
                                 onChange={(e) => handleUpdateField(field.id, { cellSlot3: e.target.value.toUpperCase() })}
                                 className="w-full text-xs font-mono bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 placeholder-slate-300"
-                                placeholder="E15"
+                                placeholder="D17"
                                 title="3種類目のセル番地"
                               />
                             </td>
@@ -940,7 +863,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                                 value={field.cellSlot4 || ''}
                                 onChange={(e) => handleUpdateField(field.id, { cellSlot4: e.target.value.toUpperCase() })}
                                 className="w-full text-xs font-mono bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 placeholder-slate-300"
-                                placeholder="F15"
+                                placeholder="D18"
                                 title="4種類目のセル番地"
                               />
                             </td>
@@ -1107,119 +1030,59 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
             </div>
           )}
 
-          {/* Sub Tab: Basic Info Mapping (基本情報マッピング) */}
+          {/* Sub Tab: Basic Info Mapping (基本情報マッピング - 固定5項目) */}
           {activeTabSub === 'basic' && (
             <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-4">
               <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                 <div>
                   <h2 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
                     <Layers className="w-4 h-4 text-indigo-600" />
-                    <span>基本情報 ＆ 案件名セルマッピング ({basicFields.length}項目)</span>
+                    <span>基本情報マッピング（固定5項目）</span>
                   </h2>
                   <p className="text-[11px] text-slate-500">
-                    案件名、工事コード、オーダーNo.、客先名、仕様書番号などの案件基本情報をExcel原本のどのセルへ書き込むかを設定します。
+                    オーダーNo.・案件名・客先名・仕様書番号・発行日の5項目をExcel原本のどのセルへ書き込むか設定します。（項目は固定・セル番地のみ入力可）
                   </p>
                 </div>
-
-                {isEditing && (
-                  <button
-                    onClick={handleAddBasicField}
-                    className="px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md shadow-xs flex items-center gap-1 transition-all cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>基本情報項目を追加</span>
-                  </button>
-                )}
               </div>
 
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
                     <tr>
-                      <th className="p-2 w-48">基本情報項目</th>
-                      <th className="p-2 w-32">セル番地</th>
-                      <th className="p-2 w-40">連動元</th>
-                      <th className="p-2">プレビュー初期値</th>
-                      {isEditing && <th className="p-2 text-right w-14">操作</th>}
+                      <th className="p-2.5 w-52">基本情報項目 (固定)</th>
+                      <th className="p-2.5 w-44">マッピングセル番地</th>
+                      <th className="p-2.5">連動元</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {basicFields.map((field) => {
-                      if (!isEditing) {
-                        return (
-                          <tr key={field.id} className="hover:bg-slate-50/70">
-                            <td className="p-2 font-semibold text-slate-900">
-                              {field.label}
-                            </td>
-                            <td className="p-2 font-mono font-bold text-indigo-700">
-                              {field.cell}
-                            </td>
-                            <td className="p-2 text-[11px] text-slate-500">
-                              案件サマリー一律反映
-                            </td>
-                            <td className="p-2 text-[11px] text-slate-600">
-                              {String(field.defaultValue || '-')}
-                            </td>
-                          </tr>
-                        );
-                      }
-
-                      return (
-                        <tr key={field.id} className="bg-indigo-50/20 hover:bg-indigo-50/40">
-                          <td className="p-2">
-                            <select
-                              value={field.label}
-                              onChange={(e) => handleUpdateField(field.id, { label: e.target.value })}
-                              className="w-full text-xs font-semibold bg-white border border-slate-300 rounded px-2 py-1 text-slate-900"
-                            >
-                              <option value="案件名">案件名 (工事名称)</option>
-                              <option value="案件コード">案件コード (工事番号)</option>
-                              <option value="オーダーNo.">オーダーNo.</option>
-                              <option value="客先名">客先名 (発注者)</option>
-                              <option value="客先番号">客先番号</option>
-                              <option value="工事場所">工事場所</option>
-                              <option value="仕様書番号">仕様書番号</option>
-                              <option value="発行日">発行日</option>
-                              <option value="発行元">発行元 (部署)</option>
-                              <option value="特記事項">特記事項</option>
-                              {!['案件名', '案件コード', 'オーダーNo.', '客先名', '客先番号', '工事場所', '仕様書番号', '発行日', '発行元', '特記事項'].includes(field.label) && (
-                                <option value={field.label}>{field.label}</option>
-                              )}
-                            </select>
-                          </td>
-                          <td className="p-2">
+                    {basicFields.map((field) => (
+                      <tr
+                        key={field.id}
+                        className={isEditing ? 'bg-indigo-50/20 hover:bg-indigo-50/40' : 'hover:bg-slate-50/70'}
+                      >
+                        <td className="p-2.5 font-bold text-slate-900">
+                          {field.label}
+                        </td>
+                        <td className="p-2.5">
+                          {isEditing ? (
                             <input
                               type="text"
                               value={field.cell}
                               onChange={(e) => handleUpdateField(field.id, { cell: e.target.value.toUpperCase() })}
-                              className="w-full text-xs font-mono font-bold bg-white border border-indigo-300 rounded px-2 py-1 text-indigo-800"
-                              placeholder="C5, C4..."
+                              className="w-32 text-xs font-mono font-bold bg-white border border-indigo-300 rounded px-2.5 py-1 text-indigo-800 focus:ring-1 focus:ring-indigo-500 focus:outline-hidden"
+                              placeholder="例: C3"
                             />
-                          </td>
-                          <td className="p-2 text-[11px] text-slate-500 font-mono">
-                            案件サマリー一律反映
-                          </td>
-                          <td className="p-2">
-                            <input
-                              type="text"
-                              value={String(field.defaultValue ?? '')}
-                              onChange={(e) => handleUpdateField(field.id, { defaultValue: e.target.value })}
-                              placeholder="初期値"
-                              className="w-full text-xs bg-white border border-slate-300 rounded px-2 py-1"
-                            />
-                          </td>
-                          <td className="p-2 text-right">
-                            <button
-                              onClick={() => handleDeleteField(field.id)}
-                              className="p-1 text-slate-400 hover:text-red-600 rounded transition-colors cursor-pointer"
-                              title="この基本情報マッピングを削除"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                          ) : (
+                            <span className="font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded">
+                              {field.cell || '-'}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-2.5 text-[11px] text-slate-500">
+                          {field.description || '案件サマリー一律反映'}
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -1257,7 +1120,6 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                   templateName: activeTpl.name,
                   templateCode: activeTpl.code,
                   fields: activeTpl.fields || [],
-                  tableMapping: activeTpl.tableMapping,
                   masterFileName: activeTpl.masterFileName || activeTpl.originalFileName
                 }, null, 2)}</pre>
               </div>

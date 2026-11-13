@@ -174,7 +174,7 @@ export const Header: React.FC<HeaderProps> = ({
                 className="bg-transparent text-xs font-medium text-slate-800 focus:outline-hidden cursor-pointer max-w-[120px] truncate"
               >
                 {projects.map(p => (
-                  <option key={p.id} value={p.id}>{p.code}: {p.name}</option>
+                  <option key={p.id} value={p.id}>{p.orderNo || p.code}: {p.name}</option>
                 ))}
               </select>
             </div>

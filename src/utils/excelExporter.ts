@@ -126,7 +126,7 @@ export function exportEquipmentSpecToExcel(
 
       // Read original workbook preserving structure and formulas
       const wb = XLSX.read(bytes, { type: 'array', cellStyles: true, cellNF: true, cellDates: true });
-      const targetSheetName = template.tableMapping?.targetSheetName || wb.SheetNames[0];
+      const targetSheetName = wb.SheetNames[0];
       const ws = wb.Sheets[targetSheetName];
 
       if (ws) {
@@ -140,22 +140,20 @@ export function exportEquipmentSpecToExcel(
           }
         }
 
-        // 2. Inject Table Rows (Detail List) if configured
-        if (template.tableMapping) {
-          const tMap = template.tableMapping;
-          const startRow = tMap.startRow || 12;
-
-          items.forEach((item, index) => {
-            const currentRow = startRow + index;
-
-            if (tMap.tagNoCol) setCellValue(ws, `${tMap.tagNoCol}${currentRow}`, item.tagNo || '-');
-            if (tMap.nameCol) setCellValue(ws, `${tMap.nameCol}${currentRow}`, item.name);
-            if (tMap.diameterCol) setCellValue(ws, `${tMap.diameterCol}${currentRow}`, item.diameter || '-');
-            if (tMap.materialCol) setCellValue(ws, `${tMap.materialCol}${currentRow}`, item.material || '-');
-            if (tMap.quantityCol) setCellValue(ws, `${tMap.quantityCol}${currentRow}`, `${item.quantity} ${item.unit || '台'}`);
-            if (tMap.deliveryDateCol) setCellValue(ws, `${tMap.deliveryDateCol}${currentRow}`, item.deliveryDate || '-');
-            if (tMap.notesCol) setCellValue(ws, `${tMap.notesCol}${currentRow}`, item.notes || '');
-          });
+        // 2. Inject Individual Detail Field Mappings (機器名, 数量, 納期, 特記事項)
+        if (template.fields && template.fields.length > 0) {
+          const detailFields = template.fields.filter(f => f.group === 'detail');
+          for (const f of detailFields) {
+            const slots = [f.cell, f.cellSlot2, f.cellSlot3, f.cellSlot4];
+            slots.forEach((addr, idx) => {
+              const item = items[idx];
+              if (!addr || !item) return;
+              if (f.label.includes('機器名')) setCellValue(ws, addr, item.name);
+              else if (f.label.includes('数量')) setCellValue(ws, addr, `${item.quantity} ${item.unit || '台'}`);
+              else if (f.label.includes('納期')) setCellValue(ws, addr, item.deliveryDate || '-');
+              else if (f.label.includes('特記')) setCellValue(ws, addr, item.notes || '');
+            });
+          }
         }
 
         // Generate download

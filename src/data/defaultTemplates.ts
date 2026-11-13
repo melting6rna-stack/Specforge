@@ -15,13 +15,31 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
     sourceType: 'preset',
     fields: [
       {
-        id: 'f-title',
-        label: '仕様書標題',
-        cell: 'B2',
+        id: 'f-order-no',
+        label: 'オーダーNo.',
+        cell: 'C3',
         type: 'text',
         group: 'basic',
-        defaultValue: '【 配水管敷設工事 特記仕様書 】',
-        description: '表題部分に印字されるタイトル'
+        defaultValue: '202500444',
+        description: '案件サマリー（オーダーNo.）から自動反映'
+      },
+      {
+        id: 'f-project-name',
+        label: '案件名',
+        cell: 'C5',
+        type: 'text',
+        group: 'basic',
+        defaultValue: '令和8年度 配水本管更新工事（第1工区）',
+        description: '案件サマリー（案件名）から自動反映'
+      },
+      {
+        id: 'f-client-name',
+        label: '客先名',
+        cell: 'G6',
+        type: 'text',
+        group: 'basic',
+        defaultValue: '〇〇化学工業株式会社',
+        description: '案件サマリー（客先名）から自動反映'
       },
       {
         id: 'f-docno',
@@ -29,7 +47,8 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
         cell: 'C4',
         type: 'text',
         group: 'basic',
-        defaultValue: 'SPEC-PIPE-2026-001'
+        defaultValue: 'SPEC-PIPE-2026-001',
+        description: 'オーダーNo.・機器番号から自動生成'
       },
       {
         id: 'f-date',
@@ -37,32 +56,8 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
         cell: 'G4',
         type: 'date',
         group: 'basic',
-        defaultValue: new Date().toISOString().slice(0, 10)
-      },
-      {
-        id: 'f-project-name',
-        label: '工事名称 / 件名',
-        cell: 'C5',
-        type: 'text',
-        group: 'basic',
-        defaultValue: '令和8年度 配水本管更新工事（第1工区）'
-      },
-      {
-        id: 'f-issuer',
-        label: '発行元 / 設計担当',
-        cell: 'G5',
-        type: 'text',
-        group: 'basic',
-        defaultValue: '水道事業部 工事設計課'
-      },
-      {
-        id: 'f-client-no',
-        label: '客先番号',
-        cell: 'C6',
-        type: 'text',
-        group: 'basic',
-        defaultValue: '【MC】-【09821】',
-        description: '客先管理コード（案件サマリーと一律連動）'
+        defaultValue: new Date().toISOString().slice(0, 10),
+        description: '仕様書発行日'
       },
       // Checkboxes (適用要件)
       {
@@ -154,6 +149,55 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
         defaultValue: '指定工事現場荷受場所車上渡し',
         description: '資材の納入受渡方法'
       },
+      // Detail Basic Info (4 fixed items mapped individually by cell)
+      {
+        id: 'f-detail-name',
+        label: '機器名',
+        cell: 'C15',
+        cellSlot2: 'C16',
+        cellSlot3: 'C17',
+        cellSlot4: 'C18',
+        type: 'text',
+        group: 'detail',
+        defaultValue: '',
+        description: '機器名称 (例: ボール弁ユニット, 渦巻ポンプ)'
+      },
+      {
+        id: 'f-detail-qty',
+        label: '数量',
+        cell: 'F15',
+        cellSlot2: 'F16',
+        cellSlot3: 'F17',
+        cellSlot4: 'F18',
+        type: 'text',
+        group: 'detail',
+        defaultValue: '',
+        description: '発注数量・単位 (例: 4 台)'
+      },
+      {
+        id: 'f-detail-delivery',
+        label: '納期',
+        cell: 'G15',
+        cellSlot2: 'G16',
+        cellSlot3: 'G17',
+        cellSlot4: 'G18',
+        type: 'text',
+        group: 'detail',
+        defaultValue: '',
+        description: '納入指定時期 (例: 2026-09-15)'
+      },
+      {
+        id: 'f-detail-notes',
+        label: '特記事項',
+        cell: 'H15',
+        cellSlot2: 'H16',
+        cellSlot3: 'H17',
+        cellSlot4: 'H18',
+        type: 'text',
+        group: 'detail',
+        defaultValue: '',
+        description: '機器ごとの特記事項・備考'
+      },
       // Notes
       {
         id: 'f-notes',
@@ -164,17 +208,6 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
         defaultValue: '1. 管内面への土砂・雨水等の浸入防止措置（養生キャップ）を施して搬入すること。\n2. 各管材の胴体部に規格名称、ロット番号、製造年月日が明瞭に刻印されていること。\n3. 接合用ゴム輪・ボルトナット類は正規規格品を一括納入すること。'
       }
     ],
-    tableMapping: {
-      startRow: 15,
-      targetSheetName: '仕様書',
-      tagNoCol: 'B',
-      nameCol: 'C',
-      diameterCol: 'D',
-      materialCol: 'E',
-      quantityCol: 'F',
-      deliveryDateCol: 'G',
-      notesCol: 'H'
-    },
     updatedAt: '2026-11-06'
   },
   {
@@ -191,12 +224,31 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
     sourceType: 'preset',
     fields: [
       {
-        id: 'f-title',
-        label: '仕様書標題',
-        cell: 'B2',
+        id: 'f-order-no',
+        label: 'オーダーNo.',
+        cell: 'C3',
         type: 'text',
         group: 'basic',
-        defaultValue: '【 配管・バルブ交換工事 仕様書 】'
+        defaultValue: '202500444',
+        description: '案件サマリー（オーダーNo.）から自動反映'
+      },
+      {
+        id: 'f-project-name',
+        label: '案件名',
+        cell: 'C5',
+        type: 'text',
+        group: 'basic',
+        defaultValue: '浄水場送水ポンプ室 バルブ更新工事',
+        description: '案件サマリー（案件名）から自動反映'
+      },
+      {
+        id: 'f-client-name',
+        label: '客先名',
+        cell: 'G6',
+        type: 'text',
+        group: 'basic',
+        defaultValue: '〇〇化学工業株式会社',
+        description: '案件サマリー（客先名）から自動反映'
       },
       {
         id: 'f-docno',
@@ -204,7 +256,8 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
         cell: 'C4',
         type: 'text',
         group: 'basic',
-        defaultValue: 'SPEC-VALVE-2026-002'
+        defaultValue: 'SPEC-VALVE-2026-002',
+        description: 'オーダーNo.・機器番号から自動生成'
       },
       {
         id: 'f-date',
@@ -212,32 +265,8 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
         cell: 'G4',
         type: 'date',
         group: 'basic',
-        defaultValue: new Date().toISOString().slice(0, 10)
-      },
-      {
-        id: 'f-project-name',
-        label: '施設名称 / 件名',
-        cell: 'C5',
-        type: 'text',
-        group: 'basic',
-        defaultValue: '浄水場送水ポンプ室 バルブ更新工事'
-      },
-      {
-        id: 'f-issuer',
-        label: '発行元',
-        cell: 'G5',
-        type: 'text',
-        group: 'basic',
-        defaultValue: 'プラント施設課'
-      },
-      {
-        id: 'f-client-no',
-        label: '客先番号',
-        cell: 'C6',
-        type: 'text',
-        group: 'basic',
-        defaultValue: '【MC】-【09821】',
-        description: '客先管理コード（案件サマリーと一律連動）'
+        defaultValue: new Date().toISOString().slice(0, 10),
+        description: '仕様書発行日'
       },
       // Checkboxes
       {
@@ -324,6 +353,55 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
         ],
         defaultValue: '指定プラント荷受所車上渡し'
       },
+      // Detail Basic Info (4 fixed items mapped individually by cell)
+      {
+        id: 'f-detail-name',
+        label: '機器名',
+        cell: 'C15',
+        cellSlot2: 'C16',
+        cellSlot3: 'C17',
+        cellSlot4: 'C18',
+        type: 'text',
+        group: 'detail',
+        defaultValue: '',
+        description: '機器名称 (例: ボール弁ユニット, 渦巻ポンプ)'
+      },
+      {
+        id: 'f-detail-qty',
+        label: '数量',
+        cell: 'F15',
+        cellSlot2: 'F16',
+        cellSlot3: 'F17',
+        cellSlot4: 'F18',
+        type: 'text',
+        group: 'detail',
+        defaultValue: '',
+        description: '発注数量・単位 (例: 4 台)'
+      },
+      {
+        id: 'f-detail-delivery',
+        label: '納期',
+        cell: 'G15',
+        cellSlot2: 'G16',
+        cellSlot3: 'G17',
+        cellSlot4: 'G18',
+        type: 'text',
+        group: 'detail',
+        defaultValue: '',
+        description: '納入指定時期 (例: 2026-09-15)'
+      },
+      {
+        id: 'f-detail-notes',
+        label: '特記事項',
+        cell: 'H15',
+        cellSlot2: 'H16',
+        cellSlot3: 'H17',
+        cellSlot4: 'H18',
+        type: 'text',
+        group: 'detail',
+        defaultValue: '',
+        description: '機器ごとの特記事項・備考'
+      },
       {
         id: 'f-notes',
         label: '特記事項・指示事項',
@@ -333,17 +411,6 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
         defaultValue: '・銘板にタグNo.、口径、圧力定格、流向矢印を刻印すること。\n・既設配管とのフランジボルト穴位置の一致を確認のこと。'
       }
     ],
-    tableMapping: {
-      startRow: 15,
-      targetSheetName: '仕様書',
-      tagNoCol: 'B',
-      nameCol: 'C',
-      diameterCol: 'D',
-      materialCol: 'E',
-      quantityCol: 'F',
-      deliveryDateCol: 'G',
-      notesCol: 'H'
-    },
     updatedAt: '2026-11-06'
   },
   {
@@ -360,12 +427,31 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
     sourceType: 'preset',
     fields: [
       {
-        id: 'f-title',
-        label: '仕様書標題',
-        cell: 'B2',
+        id: 'f-order-no',
+        label: 'オーダーNo.',
+        cell: 'C3',
         type: 'text',
         group: 'basic',
-        defaultValue: '【 ポンプ・機械装置 製作特記仕様書 】'
+        defaultValue: '202500444',
+        description: '案件サマリー（オーダーNo.）から自動反映'
+      },
+      {
+        id: 'f-project-name',
+        label: '案件名',
+        cell: 'C5',
+        type: 'text',
+        group: 'basic',
+        defaultValue: '新第2配水池 送水ポンプ増設工事',
+        description: '案件サマリー（案件名）から自動反映'
+      },
+      {
+        id: 'f-client-name',
+        label: '客先名',
+        cell: 'G6',
+        type: 'text',
+        group: 'basic',
+        defaultValue: '〇〇化学工業株式会社',
+        description: '案件サマリー（客先名）から自動反映'
       },
       {
         id: 'f-docno',
@@ -373,7 +459,8 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
         cell: 'C4',
         type: 'text',
         group: 'basic',
-        defaultValue: 'SPEC-MECH-2026-003'
+        defaultValue: 'SPEC-MECH-2026-003',
+        description: 'オーダーNo.・機器番号から自動生成'
       },
       {
         id: 'f-date',
@@ -381,32 +468,8 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
         cell: 'G4',
         type: 'date',
         group: 'basic',
-        defaultValue: new Date().toISOString().slice(0, 10)
-      },
-      {
-        id: 'f-project-name',
-        label: '工事名称 / 件名',
-        cell: 'C5',
-        type: 'text',
-        group: 'basic',
-        defaultValue: '新第2配水池 送水ポンプ増設工事'
-      },
-      {
-        id: 'f-issuer',
-        label: '発行元',
-        cell: 'G5',
-        type: 'text',
-        group: 'basic',
-        defaultValue: '技術統括部 機械設備設計課'
-      },
-      {
-        id: 'f-client-no',
-        label: '客先番号',
-        cell: 'C6',
-        type: 'text',
-        group: 'basic',
-        defaultValue: '【MC】-【09821】',
-        description: '客先管理コード（案件サマリーと一律連動）'
+        defaultValue: new Date().toISOString().slice(0, 10),
+        description: '仕様書発行日'
       },
       // Checkboxes
       {
@@ -493,6 +556,55 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
         ],
         defaultValue: 'プラント現場機械基礎上車上渡し'
       },
+      // Detail Basic Info (4 fixed items mapped individually by cell)
+      {
+        id: 'f-detail-name',
+        label: '機器名',
+        cell: 'C15',
+        cellSlot2: 'C16',
+        cellSlot3: 'C17',
+        cellSlot4: 'C18',
+        type: 'text',
+        group: 'detail',
+        defaultValue: '',
+        description: '機器名称 (例: ボール弁ユニット, 渦巻ポンプ)'
+      },
+      {
+        id: 'f-detail-qty',
+        label: '数量',
+        cell: 'F15',
+        cellSlot2: 'F16',
+        cellSlot3: 'F17',
+        cellSlot4: 'F18',
+        type: 'text',
+        group: 'detail',
+        defaultValue: '',
+        description: '発注数量・単位 (例: 4 台)'
+      },
+      {
+        id: 'f-detail-delivery',
+        label: '納期',
+        cell: 'G15',
+        cellSlot2: 'G16',
+        cellSlot3: 'G17',
+        cellSlot4: 'G18',
+        type: 'text',
+        group: 'detail',
+        defaultValue: '',
+        description: '納入指定時期 (例: 2026-09-15)'
+      },
+      {
+        id: 'f-detail-notes',
+        label: '特記事項',
+        cell: 'H15',
+        cellSlot2: 'H16',
+        cellSlot3: 'H17',
+        cellSlot4: 'H18',
+        type: 'text',
+        group: 'detail',
+        defaultValue: '',
+        description: '機器ごとの特記事項・備考'
+      },
       {
         id: 'f-notes',
         label: '特記事項・保守指示事項',
@@ -502,17 +614,6 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
         defaultValue: '・モーターは三相200V 50/60Hz、IE3高効率トップランナー規格に適合すること。\n・取扱説明書（部品分解図、推奨潤滑油一覧含む）を製本3部および電子版PDFを納入のこと。'
       }
     ],
-    tableMapping: {
-      startRow: 15,
-      targetSheetName: '仕様書',
-      tagNoCol: 'B',
-      nameCol: 'C',
-      diameterCol: 'D',
-      materialCol: 'E',
-      quantityCol: 'F',
-      deliveryDateCol: 'G',
-      notesCol: 'H'
-    },
     updatedAt: '2026-11-06'
   }
 ];

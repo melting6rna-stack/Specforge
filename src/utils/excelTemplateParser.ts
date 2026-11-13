@@ -72,9 +72,6 @@ export async function parseExcelTemplateFile(
   const baseName = file.name.replace(/\.[^/.]+$/, '');
   const startRowNumber = headerRowIndex >= 0 ? headerRowIndex + 2 : 12;
 
-  // Auto detect columns A, B, C, D...
-  const colLetter = (idx: number) => String.fromCharCode(65 + idx);
-
   const template: SpecTemplate = {
     id: `tpl-excel-${Date.now()}`,
     code: `TPL-EXCEL-${Math.floor(100 + Math.random() * 900)}`,
@@ -88,23 +85,59 @@ export async function parseExcelTemplateFile(
     sourceType: 'custom_excel',
     originalFileName: file.name,
     rawWorkbookBase64: rawBase64, // Store original raw workbook for 100% fidelity injection
+    fields: [
+      {
+        id: 'f-detail-name',
+        label: '機器名',
+        cell: `C${startRowNumber}`,
+        cellSlot2: `C${startRowNumber + 1}`,
+        cellSlot3: `C${startRowNumber + 2}`,
+        cellSlot4: `C${startRowNumber + 3}`,
+        type: 'text',
+        group: 'detail',
+        defaultValue: '',
+        description: '機器名称 (例: ボール弁ユニット, 渦巻ポンプ)'
+      },
+      {
+        id: 'f-detail-qty',
+        label: '数量',
+        cell: `F${startRowNumber}`,
+        cellSlot2: `F${startRowNumber + 1}`,
+        cellSlot3: `F${startRowNumber + 2}`,
+        cellSlot4: `F${startRowNumber + 3}`,
+        type: 'text',
+        group: 'detail',
+        defaultValue: '',
+        description: '発注数量・単位 (例: 4 台)'
+      },
+      {
+        id: 'f-detail-delivery',
+        label: '納期',
+        cell: `G${startRowNumber}`,
+        cellSlot2: `G${startRowNumber + 1}`,
+        cellSlot3: `G${startRowNumber + 2}`,
+        cellSlot4: `G${startRowNumber + 3}`,
+        type: 'text',
+        group: 'detail',
+        defaultValue: '',
+        description: '納入指定時期 (例: 2026-09-15)'
+      },
+      {
+        id: 'f-detail-notes',
+        label: '特記事項',
+        cell: `H${startRowNumber}`,
+        cellSlot2: `H${startRowNumber + 1}`,
+        cellSlot3: `H${startRowNumber + 2}`,
+        cellSlot4: `H${startRowNumber + 3}`,
+        type: 'text',
+        group: 'detail',
+        defaultValue: '',
+        description: '機器ごとの特記事項・備考'
+      }
+    ],
     cellMappings: [
-      { id: 'cm-title', label: '仕様書標題', cell: 'C3', fieldKey: 'title', description: '仕様書メインタイトル' },
-      { id: 'cm-docno', label: '文書番号', cell: 'H2', fieldKey: 'documentNo', description: '管理番号' },
-      { id: 'cm-date', label: '発行日', cell: 'H3', fieldKey: 'issueDate', description: '発行年月日' },
       { id: 'cm-notes', label: '特記事項 (例: E30)', cell: 'E30', fieldKey: 'notes', description: '指定セルへの個別指示代入' }
     ],
-    tableMapping: {
-      startRow: startRowNumber,
-      targetSheetName: firstSheetName,
-      tagNoCol: 'A',
-      nameCol: 'B',
-      diameterCol: 'C',
-      materialCol: 'D',
-      quantityCol: 'E',
-      deliveryDateCol: 'F',
-      notesCol: 'G'
-    },
     updatedAt: new Date().toISOString().slice(0, 10)
   };
 

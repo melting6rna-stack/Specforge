@@ -180,10 +180,10 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
         setSelectedSchemaType(payload.schemaType || 'generic');
         setSelectedRawDocument(payload.rawDocument || null);
 
-        // Autofill project name & code if detected from Tokki schema document
+        // Autofill project name & orderNo if detected from Tokki schema document
         if (payload.projects && payload.projects[0]) {
           if (!newProjectName) setNewProjectName(payload.projects[0].name);
-          if (!newProjectCode) setNewProjectCode(payload.projects[0].code);
+          if (!newOrderNo) setNewOrderNo(payload.projects[0].orderNo || payload.projects[0].code);
           if (payload.projects[0].description && !newDesc) setNewDesc(payload.projects[0].description);
         }
       }
@@ -206,7 +206,7 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
 
     try {
       setIsReadingFile(true);
-      const codeSuggest = newProjectCode.trim() || `PRJ-${new Date().getFullYear()}-${projects.length + 1}`;
+      const codeSuggest = newOrderNo.trim() || newProjectCode.trim() || `PRJ-${new Date().getFullYear()}-${projects.length + 1}`;
       const handle = await (window as any).showSaveFilePicker({
         suggestedName: `${codeSuggest}_database.json`,
         types: [
@@ -278,7 +278,8 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
     const projectId = `prj-${Date.now()}`;
     const c1 = newCodePart1.trim();
     const c2 = newCodePart2.trim();
-    const combinedCode = c1 ? (c2 ? `${c1}-${c2}` : c1) : (newProjectCode.trim() || `PRJ-${new Date().getFullYear()}-${projects.length + 1}`);
+    const trimmedOrder = newOrderNo.trim();
+    const combinedCode = c1 ? (c2 ? `${c1}-${c2}` : c1) : (trimmedOrder || newProjectCode.trim() || `PRJ-${new Date().getFullYear()}-${projects.length + 1}`);
 
     const p1 = newClientNumberPart1.trim();
     const p2 = newClientNumberPart2.trim();
@@ -366,13 +367,8 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    {currentProject.orderNo && (
-                      <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800">
-                        Ord: {currentProject.orderNo}
-                      </span>
-                    )}
-                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-indigo-300">
-                      コード: {currentProject.code}
+                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800">
+                      オーダーNo.: {currentProject.orderNo || currentProject.code}
                     </span>
                     {(currentProject.clientNumber || currentProject.clientNumberPart1 || currentProject.clientNumberPart2) && (
                       <span className="text-[10px] font-mono px-1.5 py-0.5 rounded font-semibold bg-slate-800 text-slate-300">
@@ -421,7 +417,7 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
                     setSelectedProjectForEdit(currentProject);
                   }}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-2xs transition-colors cursor-pointer"
-                  title="この案件の基本情報（オーダーNo.・案件コード・案件名・客先名）を編集"
+                  title="この案件の基本情報（オーダーNo.・案件名・客先名）を編集"
                 >
                   <Edit3 className="w-3.5 h-3.5" />
                   <span>基本情報編集</span>
@@ -601,7 +597,7 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
                   type="button"
                   onClick={() => setSelectedProjectForEdit(currentProject)}
                   className="px-3 py-1.5 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
-                  title="案件の共通基本情報（オーダーNo, 案件コード, 客先等）を確認・編集"
+                  title="案件の共通基本情報（オーダーNo.・案件名・客先等）を確認・編集"
                 >
                   <Edit3 className="w-3.5 h-3.5 text-indigo-600" />
                   <span>基本情報を確認・編集</span>
@@ -691,7 +687,7 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
 
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1 flex items-center justify-between">
-                    <span>案件コード <span className="text-red-500">*</span></span>
+                    <span>管理サブコード <span className="text-slate-400 font-normal">(任意)</span></span>
                     <span className="text-[10px] text-slate-400 font-normal font-mono">[前半] - [後半] (例: 20345-001)</span>
                   </label>
                   <div className="flex items-center gap-1.5">

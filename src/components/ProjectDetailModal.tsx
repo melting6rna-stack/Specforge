@@ -118,13 +118,14 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
       return;
     }
 
+    const trimmedOrderNo = orderNo.trim();
     const c1 = codePart1.trim();
     const c2 = codePart2.trim();
-    if (!c1) {
-      setValidationError('案件コードの前半を入力してください。');
+    if (!trimmedOrderNo && !c1) {
+      setValidationError('オーダーNo.を入力してください。');
       return;
     }
-    const combinedCode = c2 ? `${c1}-${c2}` : c1;
+    const combinedCode = c1 ? (c2 ? `${c1}-${c2}` : c1) : trimmedOrderNo;
 
     const p1 = clientNumberPart1.trim();
     const p2 = clientNumberPart2.trim();
@@ -167,7 +168,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
             <div>
               <h2 className="font-bold text-sm">案件基本情報の登録・編集</h2>
               <p className="text-[11px] text-slate-400">
-                オーダーNo・案件コード・案件名・客先名などのマスター共通設定
+                オーダーNo.・案件名・客先名などのマスター共通設定
               </p>
             </div>
           </div>
@@ -197,7 +198,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
             </div>
           )}
 
-          {/* Section: コア識別情報 (オーダーNo, 案件コード, 案件名, 客先名) */}
+          {/* Section: コア識別情報 (オーダーNo., 案件名, 客先名) */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3.5">
             <div className="text-xs font-bold text-slate-900 flex items-center justify-between border-b border-slate-200/80 pb-2">
               <span className="flex items-center gap-1.5">
@@ -212,7 +213,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
               {/* 1. オーダーNo. */}
               <div>
                 <label className="text-[11px] font-semibold text-slate-700 block mb-1">
-                  オーダーNo. <span className="text-slate-400 font-normal">(例: 202500444)</span>
+                  オーダーNo. <span className="text-indigo-600">*</span> <span className="text-slate-400 font-normal">(例: 202500444)</span>
                 </label>
                 <div className="relative">
                   <input
@@ -225,16 +226,15 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                 </div>
               </div>
 
-              {/* 2. 案件コード (ハイフン固定・左右2分割入力) */}
+              {/* 2. 管理サブコード (任意) */}
               <div>
                 <label className="text-[11px] font-semibold text-slate-700 block mb-1 flex items-center justify-between">
-                  <span>案件コード <span className="text-indigo-600">*</span></span>
+                  <span>管理サブコード <span className="text-slate-400 font-normal">(任意)</span></span>
                   <span className="text-[10px] text-slate-400 font-normal font-mono">[前半] - [後半] (例: 20345-001)</span>
                 </label>
                 <div className="flex items-center gap-1.5">
                   <input
                     type="text"
-                    required
                     value={codePart1}
                     onChange={(e) => setCodePart1(e.target.value)}
                     placeholder="20345"

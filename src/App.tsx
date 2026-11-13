@@ -14,6 +14,7 @@ import { placeItemWithResequence, resequenceProjectItems } from './utils/tagNumb
 import { DEFAULT_TEMPLATES } from './data/defaultTemplates';
 import { INITIAL_PROJECTS, INITIAL_CATEGORIES, INITIAL_ITEMS } from './data/sampleOrders';
 import { parseEquipmentExcel } from './utils/excelTemplateParser';
+import { normalizeSpecTemplate } from './utils/templateUtils';
 import { 
   DatabasePayload,
   PermissionRequiredError,
@@ -100,15 +101,20 @@ export default function App() {
     return INITIAL_ITEMS;
   });
 
-  // 4. Templates state
+  // 4. Templates state (normalized to individual 4-slot cell mappings)
   const [templates, setTemplates] = useState<SpecTemplate[]>(() => {
     try {
       const saved = localStorage.getItem('specforge_templates_v2');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed: SpecTemplate[] = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map(normalizeSpecTemplate);
+        }
+      }
     } catch (e) {
       console.warn('Failed to parse saved templates', e);
     }
-    return DEFAULT_TEMPLATES;
+    return DEFAULT_TEMPLATES.map(normalizeSpecTemplate);
   });
 
   // Persist templates to localStorage whenever updated
@@ -236,7 +242,10 @@ export default function App() {
         } else if (e.key === 'specforge_categories_v3') {
           setCategories(JSON.parse(e.newValue));
         } else if (e.key === 'specforge_templates_v2') {
-          setTemplates(JSON.parse(e.newValue));
+          const parsed: SpecTemplate[] = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) {
+            setTemplates(parsed.map(normalizeSpecTemplate));
+          }
         }
       } catch (err) {
         console.warn('Failed to sync storage event across windows', err);

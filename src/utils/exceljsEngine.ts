@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { SpecTemplate, EquipmentItem, SpecFieldMapping, SpecMappingAssetFile } from '../types';
+import { normalizeSpecTemplate } from './templateUtils';
 
 /**
  * Creates a professional fallback master Excel template if none was uploaded.
@@ -54,6 +55,12 @@ export async function createDefaultMasterWorkbook(template: SpecTemplate): Promi
   titleCell.font = { name: 'Meiryo UI', size: 16, bold: true, color: { argb: 'FF0F172A' } };
   titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
   worksheet.getRow(2).height = 36;
+
+  // Row 3: Order No.
+  worksheet.getCell('B3').value = 'オーダーNo.:';
+  worksheet.getCell('B3').font = { name: 'Meiryo UI', size: 9, color: { argb: 'FF64748B' } };
+  worksheet.getCell('C3').value = '202500444';
+  worksheet.getCell('C3').font = { name: 'Meiryo UI', size: 10, bold: true, color: { argb: 'FF0F172A' } };
 
   // Row 4: Document Metadata
   worksheet.getCell('B4').value = '仕様書番号:';
@@ -146,23 +153,17 @@ export async function createDefaultMasterWorkbook(template: SpecTemplate): Promi
     c.border = borderDark;
   }
 
-  // Sample data row at row 15
-  const sampleRow = [
-    { col: 'B', val: 'V-101' },
-    { col: 'C', val: 'ボール弁ユニット' },
-    { col: 'D', val: '50A 10K' },
-    { col: 'E', val: 'SCS13A' },
-    { col: 'F', val: 4 },
-    { col: 'G', val: '2026/05/15' },
-    { col: 'H', val: '禁油脱脂証明書添付' }
-  ];
-  worksheet.getRow(15).height = 20;
-  for (const cellInfo of sampleRow) {
-    const c = worksheet.getCell(`${cellInfo.col}15`);
-    c.value = cellInfo.val;
-    c.font = { name: 'Meiryo UI', size: 9 };
-    c.border = borderThin;
-    c.alignment = { vertical: 'middle', horizontal: cellInfo.col === 'F' ? 'right' : 'left' };
+  // Styled empty equipment rows (rows 15-18) ready for individual cell mapping
+  const rowCols = ['B', 'C', 'D', 'E', 'F', 'G', 'H'];
+  for (let r = 15; r <= 18; r++) {
+    worksheet.getRow(r).height = 20;
+    for (const col of rowCols) {
+      const c = worksheet.getCell(`${col}${r}`);
+      c.value = '';
+      c.font = { name: 'Meiryo UI', size: 9 };
+      c.border = borderThin;
+      c.alignment = { vertical: 'middle', horizontal: col === 'F' ? 'right' : 'left' };
+    }
   }
 
   // Section 3: Special Notes (e.g. Row 25 - E30 area)
@@ -215,80 +216,90 @@ export async function fillSpecificationExcel(
     await workbook.xlsx.load(defaultBuffer);
   }
 
-  const targetSheetName = template.tableMapping?.targetSheetName;
-  const worksheet = targetSheetName 
-    ? (workbook.getWorksheet(targetSheetName) || workbook.worksheets[0]) 
-    : workbook.worksheets[0];
+  const normalizedTpl = normalizeSpecTemplate(template);
+  const worksheet = workbook.worksheets[0];
 
   if (!worksheet) {
     throw new Error('対象のワークシートが見つかりません。');
   }
 
-  // 1. INJECT SPEC FIELD MAPPINGS (Form inputs: text, select, checkbox, date, textarea)
-  const fields: SpecFieldMapping[] = template.fields || [];
-
-  for (const field of fields) {
-    if (!field.cell) continue;
-    const cellAddr = field.cell.trim().toUpperCase();
-    const cell = worksheet.getCell(cellAddr);
-
-    // Resolve value
-    const rawVal = formValues[field.id];
-
-    if (field.type === 'checkbox') {
-      const isChecked = Boolean(rawVal);
-      const outputText = isChecked 
-        ? (field.checkboxConfig?.checkedValue || '☑ 要') 
-        : (field.checkboxConfig?.uncheckedValue || '☐ 不要');
-      cell.value = outputText;
-
-      if (field.labelCell && field.label) {
-        const lCell = worksheet.getCell(field.labelCell.trim().toUpperCase());
-        lCell.value = field.label;
-      }
-    } else if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
-      cell.value = String(rawVal);
-    } else if (field.defaultValue !== undefined && field.defaultValue !== '') {
-      cell.value = String(field.defaultValue);
-    }
-
-    // Helper to find spec value from an item by label
-    const getItemValByLabel = (it: EquipmentItem | undefined, label: string) => {
-      if (!it) return '';
-      const clean = label.toLowerCase();
-      if (clean.includes('機器番号') || clean.includes('tag')) return it.tagNo || '';
-      if (clean.includes('機器名') || clean.includes('名称')) return it.name || '';
-      if (clean.includes('数量')) return `${it.quantity} ${it.unit || '台'}`;
-      if (clean.includes('納期')) return it.deliveryDate || '';
-      if (clean.includes('口径') && it.diameter && it.diameter !== '-') return it.diameter;
-      if (clean.includes('材質') && it.material && it.material !== '-') return it.material;
-      if (it.specs && it.specs.length > 0) {
-        for (const sp of it.specs) {
-          if (clean.includes(sp.name.toLowerCase()) || sp.name.toLowerCase().includes(clean)) {
-            return `${sp.value}${sp.unit ? ' ' + sp.unit : ''}`;
-          }
+  // Helper to find spec/detail value from an item by label
+  const getItemValByLabel = (it: EquipmentItem | undefined, label: string) => {
+    if (!it) return '';
+    const clean = label.toLowerCase();
+    if (clean.includes('機器番号') || clean.includes('tag')) return it.tagNo || '';
+    if (clean.includes('機器名') || clean.includes('名称')) return it.name || '';
+    if (clean.includes('数量')) return `${it.quantity} ${it.unit || '台'}`;
+    if (clean.includes('納期')) return it.deliveryDate || '';
+    if (clean.includes('特記') || clean.includes('備考')) return it.notes || '';
+    if (clean.includes('口径') && it.diameter && it.diameter !== '-') return it.diameter;
+    if (clean.includes('材質') && it.material && it.material !== '-') return it.material;
+    if (it.specs && it.specs.length > 0) {
+      for (const sp of it.specs) {
+        if (clean.includes(sp.name.toLowerCase()) || sp.name.toLowerCase().includes(clean)) {
+          return `${sp.value}${sp.unit ? ' ' + sp.unit : ''}`;
         }
       }
-      return '';
-    };
+    }
+    return '';
+  };
+
+  // 1. INJECT SPEC & DETAIL FIELD MAPPINGS (Individual 1〜4 slot cell mappings)
+  const fields: SpecFieldMapping[] = normalizedTpl.fields || [];
+
+  for (const field of fields) {
+    if (field.cell && field.cell.trim()) {
+      const cellAddr = field.cell.trim().toUpperCase();
+      const cell = worksheet.getCell(cellAddr);
+      const rawVal = formValues[field.id];
+
+      if (field.type === 'checkbox') {
+        const isChecked = Boolean(rawVal);
+        const outputText = isChecked
+          ? (field.checkboxConfig?.checkedValue || '☑ 要')
+          : (field.checkboxConfig?.uncheckedValue || '☐ 不要');
+        cell.value = outputText;
+
+        if (field.labelCell && field.label) {
+          const lCell = worksheet.getCell(field.labelCell.trim().toUpperCase());
+          lCell.value = field.label;
+        }
+      } else if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
+        cell.value = String(rawVal);
+      } else if (field.group === 'detail') {
+        const item1Val = getItemValByLabel(items[0], field.label);
+        if (item1Val) cell.value = item1Val;
+      } else if (field.defaultValue !== undefined && field.defaultValue !== '') {
+        cell.value = String(field.defaultValue);
+      }
+    }
 
     // Slot 2 (2種類目)
-    if (field.cellSlot2) {
+    if (field.cellSlot2 && field.cellSlot2.trim()) {
       const addr2 = field.cellSlot2.trim().toUpperCase();
-      const val2 = formValues[`${field.id}__slot2`] || getItemValByLabel(items[1], field.label);
-      if (val2) worksheet.getCell(addr2).value = String(val2);
+      const key2 = `${field.id}__slot2`;
+      const val2 = formValues[key2] !== undefined ? formValues[key2] : getItemValByLabel(items[1], field.label);
+      if (val2 !== undefined && val2 !== null && val2 !== '') {
+        worksheet.getCell(addr2).value = String(val2);
+      }
     }
     // Slot 3 (3種類目)
-    if (field.cellSlot3) {
+    if (field.cellSlot3 && field.cellSlot3.trim()) {
       const addr3 = field.cellSlot3.trim().toUpperCase();
-      const val3 = formValues[`${field.id}__slot3`] || getItemValByLabel(items[2], field.label);
-      if (val3) worksheet.getCell(addr3).value = String(val3);
+      const key3 = `${field.id}__slot3`;
+      const val3 = formValues[key3] !== undefined ? formValues[key3] : getItemValByLabel(items[2], field.label);
+      if (val3 !== undefined && val3 !== null && val3 !== '') {
+        worksheet.getCell(addr3).value = String(val3);
+      }
     }
     // Slot 4 (4種類目)
-    if (field.cellSlot4) {
+    if (field.cellSlot4 && field.cellSlot4.trim()) {
       const addr4 = field.cellSlot4.trim().toUpperCase();
-      const val4 = formValues[`${field.id}__slot4`] || getItemValByLabel(items[3], field.label);
-      if (val4) worksheet.getCell(addr4).value = String(val4);
+      const key4 = `${field.id}__slot4`;
+      const val4 = formValues[key4] !== undefined ? formValues[key4] : getItemValByLabel(items[3], field.label);
+      if (val4 !== undefined && val4 !== null && val4 !== '') {
+        worksheet.getCell(addr4).value = String(val4);
+      }
     }
   }
 
@@ -304,89 +315,7 @@ export async function fillSpecificationExcel(
     }
   }
 
-  // 3. INJECT EQUIPMENT TABLE DETAIL ROWS
-  if (template.tableMapping) {
-    const tMap = template.tableMapping;
-    const startRow = tMap.startRow || 14;
-
-    const borderThin: Partial<ExcelJS.Borders> = {
-      top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-      left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-      bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-      right: { style: 'thin', color: { argb: 'FFCBD5E1' } }
-    };
-
-    items.forEach((item, index) => {
-      const rowNum = startRow + index;
-      const row = worksheet.getRow(rowNum);
-      if (!row.height || row.height < 20) {
-        row.height = 20;
-      }
-
-      // Format specs summary string (e.g. 50A, 7.5kW, etc.)
-      const specSummary = item.specs && item.specs.length > 0
-        ? item.specs.map(s => `${s.name}: ${s.value}${s.unit ? ' ' + s.unit : ''}`).join(', ')
-        : (item.diameter && item.diameter !== '-' ? `口径: ${item.diameter}` : '-');
-
-      if (tMap.tagNoCol) {
-        const c = worksheet.getCell(`${tMap.tagNoCol.toUpperCase()}${rowNum}`);
-        c.value = item.tagNo || '-';
-        c.border = borderThin;
-        c.font = { name: 'Meiryo UI', size: 9 };
-        c.alignment = { vertical: 'middle', horizontal: 'center' };
-      }
-
-      if (tMap.nameCol) {
-        const c = worksheet.getCell(`${tMap.nameCol.toUpperCase()}${rowNum}`);
-        c.value = item.name;
-        c.border = borderThin;
-        c.font = { name: 'Meiryo UI', size: 9, bold: true };
-        c.alignment = { vertical: 'middle', horizontal: 'left' };
-      }
-
-      if (tMap.diameterCol) {
-        const c = worksheet.getCell(`${tMap.diameterCol.toUpperCase()}${rowNum}`);
-        c.value = specSummary;
-        c.border = borderThin;
-        c.font = { name: 'Meiryo UI', size: 9 };
-        c.alignment = { vertical: 'middle', horizontal: 'left' };
-      }
-
-      if (tMap.materialCol) {
-        const c = worksheet.getCell(`${tMap.materialCol.toUpperCase()}${rowNum}`);
-        c.value = item.material || '-';
-        c.border = borderThin;
-        c.font = { name: 'Meiryo UI', size: 9 };
-        c.alignment = { vertical: 'middle', horizontal: 'center' };
-      }
-
-      if (tMap.quantityCol) {
-        const c = worksheet.getCell(`${tMap.quantityCol.toUpperCase()}${rowNum}`);
-        c.value = `${item.quantity} ${item.unit || '台'}`;
-        c.border = borderThin;
-        c.font = { name: 'Meiryo UI', size: 9, bold: true };
-        c.alignment = { vertical: 'middle', horizontal: 'right' };
-      }
-
-      if (tMap.deliveryDateCol) {
-        const c = worksheet.getCell(`${tMap.deliveryDateCol.toUpperCase()}${rowNum}`);
-        c.value = item.deliveryDate || '-';
-        c.border = borderThin;
-        c.font = { name: 'Meiryo UI', size: 9 };
-        c.alignment = { vertical: 'middle', horizontal: 'center' };
-      }
-
-      if (tMap.notesCol) {
-        const c = worksheet.getCell(`${tMap.notesCol.toUpperCase()}${rowNum}`);
-        c.value = item.notes || '-';
-        c.border = borderThin;
-        c.font = { name: 'Meiryo UI', size: 9 };
-        c.alignment = { vertical: 'middle', horizontal: 'left' };
-      }
-    });
-  }
-
-  // 4. Inject In-Preview Manual Cell Overrides
+  // 3. Inject In-Preview Manual Cell Overrides
   if (cellOverrides) {
     for (const [addr, val] of Object.entries(cellOverrides)) {
       if (addr && val !== undefined) {
@@ -448,19 +377,19 @@ export async function downloadSpecificationExcel(
  * Exports mapping definition asset as a JSON file for sharing / distribution.
  */
 export function exportMappingAssetAsJson(template: SpecTemplate): void {
+  const normalized = normalizeSpecTemplate(template);
   const asset: SpecMappingAssetFile = {
     version: '1.0',
     schemaType: 'specforge-mapping-asset',
     exportedAt: new Date().toISOString(),
-    templateId: template.id,
-    templateName: template.name,
-    templateCode: template.code,
-    description: template.description,
-    targetCategoryName: template.targetCategoryName,
-    fields: template.fields || [],
-    tableMapping: template.tableMapping,
-    masterFileName: template.masterFileName || template.originalFileName,
-    masterWorkbookBase64: template.masterWorkbookBase64 || template.rawWorkbookBase64
+    templateId: normalized.id,
+    templateName: normalized.name,
+    templateCode: normalized.code,
+    description: normalized.description,
+    targetCategoryName: normalized.targetCategoryName,
+    fields: normalized.fields || [],
+    masterFileName: normalized.masterFileName || normalized.originalFileName,
+    masterWorkbookBase64: normalized.masterWorkbookBase64 || normalized.rawWorkbookBase64
   };
 
   const jsonStr = JSON.stringify(asset, null, 2);
@@ -642,87 +571,101 @@ export async function renderSpecificationExcelGrid(
     await workbook.xlsx.load(defaultBuffer);
   }
 
+  const normalizedTpl = normalizeSpecTemplate(template);
   const availableSheets = workbook.worksheets.map(w => w.name);
-  const targetSheetName = targetSheetOverride || template.tableMapping?.targetSheetName;
-  const worksheet = targetSheetName 
-    ? (workbook.getWorksheet(targetSheetName) || workbook.worksheets[0]) 
+  const worksheet = targetSheetOverride
+    ? (workbook.getWorksheet(targetSheetOverride) || workbook.worksheets[0])
     : workbook.worksheets[0];
 
   if (!worksheet) {
     throw new Error('ワークシートが見つかりません。');
   }
 
-  // 1. Inject Fields
-  const fields = template.fields || [];
-  const fieldMappingMap: Record<string, { id: string; label: string }> = {};
-  for (const field of fields) {
-    if (!field.cell) continue;
-    const cleanAddr = field.cell.trim().toUpperCase();
-    fieldMappingMap[cleanAddr] = { id: field.id, label: field.label };
-
-    const cell = worksheet.getCell(cleanAddr);
-    const rawVal = formValues[field.id];
-    if (field.type === 'checkbox') {
-      const isChecked = Boolean(rawVal);
-      cell.value = isChecked 
-        ? (field.checkboxConfig?.checkedValue || '☑ 要') 
-        : (field.checkboxConfig?.uncheckedValue || '☐ 不要');
-      if (field.labelCell && field.label) {
-        const lCell = worksheet.getCell(field.labelCell.trim().toUpperCase());
-        lCell.value = field.label;
-      }
-    } else if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
-      cell.value = String(rawVal);
-    } else if (field.defaultValue !== undefined && field.defaultValue !== '') {
-      cell.value = String(field.defaultValue);
-    }
-
-    // Helper to find spec value from an item by label
-    const getItemVal = (it: EquipmentItem | undefined, label: string) => {
-      if (!it) return '';
-      const clean = label.toLowerCase();
-      if (clean.includes('機器番号') || clean.includes('tag')) return it.tagNo || '';
-      if (clean.includes('機器名') || clean.includes('名称')) return it.name || '';
-      if (clean.includes('数量')) return `${it.quantity} ${it.unit || '台'}`;
-      if (clean.includes('納期')) return it.deliveryDate || '';
-      if (clean.includes('口径') && it.diameter && it.diameter !== '-') return it.diameter;
-      if (clean.includes('材質') && it.material && it.material !== '-') return it.material;
-      if (it.specs && it.specs.length > 0) {
-        for (const sp of it.specs) {
-          if (clean.includes(sp.name.toLowerCase()) || sp.name.toLowerCase().includes(clean)) {
-            return `${sp.value}${sp.unit ? ' ' + sp.unit : ''}`;
-          }
+  // Helper to find spec/detail value from an item by label
+  const getItemVal = (it: EquipmentItem | undefined, label: string) => {
+    if (!it) return '';
+    const clean = label.toLowerCase();
+    if (clean.includes('機器番号') || clean.includes('tag')) return it.tagNo || '';
+    if (clean.includes('機器名') || clean.includes('名称')) return it.name || '';
+    if (clean.includes('数量')) return `${it.quantity} ${it.unit || '台'}`;
+    if (clean.includes('納期')) return it.deliveryDate || '';
+    if (clean.includes('特記') || clean.includes('備考')) return it.notes || '';
+    if (clean.includes('口径') && it.diameter && it.diameter !== '-') return it.diameter;
+    if (clean.includes('材質') && it.material && it.material !== '-') return it.material;
+    if (it.specs && it.specs.length > 0) {
+      for (const sp of it.specs) {
+        if (clean.includes(sp.name.toLowerCase()) || sp.name.toLowerCase().includes(clean)) {
+          return `${sp.value}${sp.unit ? ' ' + sp.unit : ''}`;
         }
       }
-      return '';
-    };
+    }
+    return '';
+  };
+
+  // 1. Inject Fields (including 4-slot detail & spec mappings)
+  const fields = normalizedTpl.fields || [];
+  const fieldMappingMap: Record<string, { id: string; label: string }> = {};
+  for (const field of fields) {
+    if (field.cell && field.cell.trim()) {
+      const cleanAddr = field.cell.trim().toUpperCase();
+      fieldMappingMap[cleanAddr] = { id: field.id, label: field.label };
+
+      const cell = worksheet.getCell(cleanAddr);
+      const rawVal = formValues[field.id];
+      if (field.type === 'checkbox') {
+        const isChecked = Boolean(rawVal);
+        cell.value = isChecked
+          ? (field.checkboxConfig?.checkedValue || '☑ 要')
+          : (field.checkboxConfig?.uncheckedValue || '☐ 不要');
+        if (field.labelCell && field.label) {
+          const lCell = worksheet.getCell(field.labelCell.trim().toUpperCase());
+          lCell.value = field.label;
+        }
+      } else if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
+        cell.value = String(rawVal);
+      } else if (field.group === 'detail') {
+        const item1Val = getItemVal(items[0], field.label);
+        if (item1Val) cell.value = item1Val;
+      } else if (field.defaultValue !== undefined && field.defaultValue !== '') {
+        cell.value = String(field.defaultValue);
+      }
+    }
 
     // Slot 2 (2種類目)
-    if (field.cellSlot2) {
+    if (field.cellSlot2 && field.cellSlot2.trim()) {
       const addr2 = field.cellSlot2.trim().toUpperCase();
       fieldMappingMap[addr2] = { id: `${field.id}__slot2`, label: `${field.label} (2種類目)` };
-      const val2 = formValues[`${field.id}__slot2`] || getItemVal(items[1], field.label);
-      if (val2) worksheet.getCell(addr2).value = String(val2);
+      const key2 = `${field.id}__slot2`;
+      const val2 = formValues[key2] !== undefined ? formValues[key2] : getItemVal(items[1], field.label);
+      if (val2 !== undefined && val2 !== null && val2 !== '') {
+        worksheet.getCell(addr2).value = String(val2);
+      }
     }
     // Slot 3 (3種類目)
-    if (field.cellSlot3) {
+    if (field.cellSlot3 && field.cellSlot3.trim()) {
       const addr3 = field.cellSlot3.trim().toUpperCase();
       fieldMappingMap[addr3] = { id: `${field.id}__slot3`, label: `${field.label} (3種類目)` };
-      const val3 = formValues[`${field.id}__slot3`] || getItemVal(items[2], field.label);
-      if (val3) worksheet.getCell(addr3).value = String(val3);
+      const key3 = `${field.id}__slot3`;
+      const val3 = formValues[key3] !== undefined ? formValues[key3] : getItemVal(items[2], field.label);
+      if (val3 !== undefined && val3 !== null && val3 !== '') {
+        worksheet.getCell(addr3).value = String(val3);
+      }
     }
     // Slot 4 (4種類目)
-    if (field.cellSlot4) {
+    if (field.cellSlot4 && field.cellSlot4.trim()) {
       const addr4 = field.cellSlot4.trim().toUpperCase();
       fieldMappingMap[addr4] = { id: `${field.id}__slot4`, label: `${field.label} (4種類目)` };
-      const val4 = formValues[`${field.id}__slot4`] || getItemVal(items[3], field.label);
-      if (val4) worksheet.getCell(addr4).value = String(val4);
+      const key4 = `${field.id}__slot4`;
+      const val4 = formValues[key4] !== undefined ? formValues[key4] : getItemVal(items[3], field.label);
+      if (val4 !== undefined && val4 !== null && val4 !== '') {
+        worksheet.getCell(addr4).value = String(val4);
+      }
     }
   }
 
   // 2. Inject Legacy Mappings
-  if (template.cellMappings) {
-    for (const cm of template.cellMappings) {
+  if (normalizedTpl.cellMappings) {
+    for (const cm of normalizedTpl.cellMappings) {
       if (!cm.cell || !cm.fieldKey) continue;
       const cleanAddr = cm.cell.trim().toUpperCase();
       if (!fieldMappingMap[cleanAddr]) {
@@ -736,27 +679,7 @@ export async function renderSpecificationExcelGrid(
     }
   }
 
-  // 3. Inject Equipment Table
-  if (template.tableMapping) {
-    const tMap = template.tableMapping;
-    const startRow = tMap.startRow || 15;
-    items.forEach((item, index) => {
-      const rowNum = startRow + index;
-      const specSummary = item.specs && item.specs.length > 0
-        ? item.specs.map(s => `${s.name}: ${s.value}${s.unit ? ' ' + s.unit : ''}`).join(', ')
-        : (item.diameter && item.diameter !== '-' ? `口径: ${item.diameter}` : '-');
-
-      if (tMap.tagNoCol) worksheet.getCell(`${tMap.tagNoCol.toUpperCase()}${rowNum}`).value = item.tagNo || '-';
-      if (tMap.nameCol) worksheet.getCell(`${tMap.nameCol.toUpperCase()}${rowNum}`).value = item.name;
-      if (tMap.diameterCol) worksheet.getCell(`${tMap.diameterCol.toUpperCase()}${rowNum}`).value = specSummary;
-      if (tMap.materialCol) worksheet.getCell(`${tMap.materialCol.toUpperCase()}${rowNum}`).value = item.material || '-';
-      if (tMap.quantityCol) worksheet.getCell(`${tMap.quantityCol.toUpperCase()}${rowNum}`).value = `${item.quantity} ${item.unit || '台'}`;
-      if (tMap.deliveryDateCol) worksheet.getCell(`${tMap.deliveryDateCol.toUpperCase()}${rowNum}`).value = item.deliveryDate || '-';
-      if (tMap.notesCol) worksheet.getCell(`${tMap.notesCol.toUpperCase()}${rowNum}`).value = item.notes || '-';
-    });
-  }
-
-  // 3.5 Inject In-Preview Manual Cell Overrides
+  // 3. Inject In-Preview Manual Cell Overrides
   if (cellOverrides) {
     for (const [addr, val] of Object.entries(cellOverrides)) {
       if (addr && val !== undefined) {
@@ -833,11 +756,13 @@ export async function renderSpecificationExcelGrid(
   }
 
   for (const f of fields) {
-    if (f.cell) {
-      const parsed = parseCellAddress(f.cell);
-      if (parsed) {
-        maxColIndex = Math.max(maxColIndex, parsed.col);
-        maxRowIndex = Math.max(maxRowIndex, parsed.row);
+    for (const addr of [f.cell, f.cellSlot2, f.cellSlot3, f.cellSlot4]) {
+      if (addr) {
+        const parsed = parseCellAddress(addr.trim());
+        if (parsed) {
+          maxColIndex = Math.max(maxColIndex, parsed.col);
+          maxRowIndex = Math.max(maxRowIndex, parsed.row);
+        }
       }
     }
   }
