@@ -25,18 +25,6 @@ interface ProjectDetailModalProps {
   onDeleteProject?: (projectId: string) => void;
 }
 
-const parseClientNumberParts = (val?: string, part1?: string, part2?: string) => {
-  if (part1 !== undefined && part1 !== null && part2 !== undefined && part2 !== null) {
-    return { p1: part1, p2: part2 };
-  }
-  if (!val) return { p1: '', p2: '' };
-  const m = val.match(/^【?(.*?)】?-【?(.*?)】?$/);
-  if (m) {
-    return { p1: m[1] || '', p2: m[2] || '' };
-  }
-  const parts = val.split('-');
-  return { p1: parts[0] || '', p2: parts[1] || '' };
-};
 
 const parseCodeParts = (code?: string, part1?: string, part2?: string) => {
   if (part1 !== undefined && part1 !== null && part2 !== undefined && part2 !== null) {
@@ -72,10 +60,6 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
   const [codePart1, setCodePart1] = useState(initialCode.c1);
   const [codePart2, setCodePart2] = useState(initialCode.c2);
 
-  const initialClientNum = parseClientNumberParts(project.clientNumber, project.clientNumberPart1, project.clientNumberPart2);
-  const [clientNumberPart1, setClientNumberPart1] = useState(initialClientNum.p1);
-  const [clientNumberPart2, setClientNumberPart2] = useState(initialClientNum.p2);
-
   const [location, setLocation] = useState(project.location || '');
   const [department, setDepartment] = useState(project.department || '');
   const [description, setDescription] = useState(project.description || '');
@@ -94,10 +78,6 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
       const c = parseCodeParts(project.code, project.codePart1, project.codePart2);
       setCodePart1(c.c1);
       setCodePart2(c.c2);
-
-      const cn = parseClientNumberParts(project.clientNumber, project.clientNumberPart1, project.clientNumberPart2);
-      setClientNumberPart1(cn.p1);
-      setClientNumberPart2(cn.p2);
 
       setLocation(project.location || '');
       setDepartment(project.department || '');
@@ -127,10 +107,6 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
     }
     const combinedCode = c1 ? (c2 ? `${c1}-${c2}` : c1) : trimmedOrderNo;
 
-    const p1 = clientNumberPart1.trim();
-    const p2 = clientNumberPart2.trim();
-    const combinedClientNumber = (p1 || p2) ? `【${p1}】-【${p2}】` : '';
-
     const updated: ProjectWorkspace = {
       ...project,
       orderNo: orderNo.trim(),
@@ -139,9 +115,9 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
       codePart1: c1,
       codePart2: c2,
       clientName: clientName.trim() || '未設定',
-      clientNumber: combinedClientNumber,
-      clientNumberPart1: p1,
-      clientNumberPart2: p2,
+      clientNumber: '',
+      clientNumberPart1: '',
+      clientNumberPart2: '',
       location: location.trim(),
       department: department.trim(),
       description: description.trim()
@@ -226,10 +202,10 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                 </div>
               </div>
 
-              {/* 2. 管理サブコード (任意) */}
+              {/* 2. 客先コード (任意) */}
               <div>
                 <label className="text-[11px] font-semibold text-slate-700 block mb-1 flex items-center justify-between">
-                  <span>管理サブコード <span className="text-slate-400 font-normal">(任意)</span></span>
+                  <span>客先コード <span className="text-slate-400 font-normal">(任意)</span></span>
                   <span className="text-[10px] text-slate-400 font-normal font-mono">[前半] - [後半] (例: 20345-001)</span>
                 </label>
                 <div className="flex items-center gap-1.5">
@@ -267,7 +243,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
               </div>
 
               {/* 4. 客先名 */}
-              <div>
+              <div className="sm:col-span-2">
                 <label className="text-[11px] font-semibold text-slate-700 block mb-1">
                   客先名 / 発注者 <span className="text-slate-400 font-normal">(例: 〇〇市水道局)</span>
                 </label>
@@ -278,39 +254,6 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
                   placeholder="例: 〇〇市水道局"
                   className="w-full text-xs bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-hidden"
                 />
-              </div>
-
-              {/* 5. 客先番号 【】-【】 */}
-              <div>
-                <label className="text-[11px] font-semibold text-slate-700 block mb-1 flex items-center justify-between">
-                  <span>客先番号</span>
-                  <span className="text-[10px] text-slate-400 font-mono">【】-【】形式</span>
-                </label>
-                <div className="flex items-center gap-1">
-                  <div className="flex-1 flex items-center bg-white border border-slate-300 rounded-lg px-2 py-1.5 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition-all">
-                    <span className="text-slate-500 font-bold select-none text-xs font-sans mr-0.5">【</span>
-                    <input
-                      type="text"
-                      value={clientNumberPart1}
-                      onChange={(e) => setClientNumberPart1(e.target.value)}
-                      placeholder="記号"
-                      className="w-full text-xs font-mono font-bold text-center bg-transparent border-0 p-0 text-slate-900 focus:outline-hidden"
-                    />
-                    <span className="text-slate-500 font-bold select-none text-xs font-sans ml-0.5">】</span>
-                  </div>
-                  <span className="text-slate-400 font-bold select-none text-sm">-</span>
-                  <div className="flex-1 flex items-center bg-white border border-slate-300 rounded-lg px-2 py-1.5 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition-all">
-                    <span className="text-slate-500 font-bold select-none text-xs font-sans mr-0.5">【</span>
-                    <input
-                      type="text"
-                      value={clientNumberPart2}
-                      onChange={(e) => setClientNumberPart2(e.target.value)}
-                      placeholder="番号"
-                      className="w-full text-xs font-mono font-bold text-center bg-transparent border-0 p-0 text-slate-900 focus:outline-hidden"
-                    />
-                    <span className="text-slate-500 font-bold select-none text-xs font-sans ml-0.5">】</span>
-                  </div>
-                </div>
               </div>
 
             </div>

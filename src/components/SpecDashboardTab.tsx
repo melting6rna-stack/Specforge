@@ -138,13 +138,13 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
 
 
 
-  // Auto-calculated document number: オーダーNo.の後にハイフン入れず機器種別の2文字+G、ハイフン+機器番号
+  // Auto-calculated document number: 客先コードの後にハイフン入れず機器種別の2文字+G、ハイフン+機器番号
   const fixedDocNo = useMemo(() => {
-    const orderVal = currentProject?.orderNo || currentProject?.code || 'PRJ-2026-01';
+    const clientCode = currentProject?.code || currentProject?.orderNo || 'PRJ-2026-01';
     const typeCode = (primaryItem?.equipmentType || 'VA').trim().toUpperCase();
     const tag = primaryItem?.tagNo || 'V-101';
-    return `${orderVal}${typeCode}G-${tag}`;
-  }, [currentProject?.orderNo, currentProject?.code, primaryItem?.equipmentType, primaryItem?.tagNo]);
+    return `${clientCode}${typeCode}G-${tag}`;
+  }, [currentProject?.code, currentProject?.orderNo, primaryItem?.equipmentType, primaryItem?.tagNo]);
 
   // Helper to transfer equipment specs into mapped template fields
   const transferSpecsFromEquipment = useCallback((item: EquipmentItem | undefined, tpl: SpecTemplate | undefined, currentVals: Record<string, any>, itemsList?: EquipmentItem[]) => {
@@ -181,10 +181,10 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
         }
       }
       if (f.id === 'f-docno' || labelClean.includes('仕様書番号')) {
-        const orderVal = currentProject?.orderNo || currentProject?.code || 'PRJ-2026-01';
+        const clientCode = currentProject?.code || currentProject?.orderNo || 'PRJ-2026-01';
         const typeCode = (item.equipmentType || 'VA').trim().toUpperCase();
-        newVals[f.id] = `${orderVal}${typeCode}G-${item.tagNo || 'V-101'}`;
-        matched[f.id] = `オーダーNo.・機器種別連動: ${newVals[f.id]}`;
+        newVals[f.id] = `${clientCode}${typeCode}G-${item.tagNo || 'V-101'}`;
+        matched[f.id] = `客先コード・機器種別連動: ${newVals[f.id]}`;
         continue;
       }
       if (f.id === 'f-issuer' || labelClean.includes('発行元')) {
@@ -665,11 +665,11 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                   <span className="text-slate-800 font-medium">{currentProject.clientName}</span>
                 </div>
               )}
-              {(currentProject?.clientNumber || currentProject?.clientNumberPart1 || currentProject?.clientNumberPart2) && (
+              {currentProject?.code && currentProject.code !== (currentProject.orderNo || '') && (
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-500 font-medium">客先番号:</span>
+                  <span className="text-slate-500 font-medium">客先コード:</span>
                   <span className="font-mono font-bold text-slate-800">
-                    {currentProject.clientNumber || `【${currentProject.clientNumberPart1 || ''}】-【${currentProject.clientNumberPart2 || ''}】`}
+                    {currentProject.code}
                   </span>
                 </div>
               )}
@@ -696,7 +696,7 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                   </span>
                 </label>
                 <span className="text-[10px] text-slate-400 font-mono">
-                  オーダーNo.・機器番号連動
+                  客先コード・機器番号連動
                 </span>
               </div>
               <input
@@ -710,7 +710,7 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                 className="w-full text-xs font-mono font-bold bg-white border border-slate-300 rounded px-2.5 py-1.5 text-indigo-900 focus:border-indigo-500 focus:outline-hidden"
               />
               <p className="text-[10px] text-slate-400">
-                ※仕様書番号はオーダーNo.と機器番号から自動生成（詳細な採番規則は別途指示で調整可能）
+                ※仕様書番号は客先コードと機器番号から自動生成（詳細な採番規則は別途指示で調整可能）
               </p>
             </div>
 

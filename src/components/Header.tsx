@@ -13,6 +13,7 @@ import {
   Save
 } from 'lucide-react';
 import { ProjectWorkspace } from '../types';
+import brandLogoUrl from '../assets/brand-logo.png?inline';
 
 interface HeaderProps {
   activeTab: 'database' | 'spec_studio' | 'templates' | 'projects';
@@ -59,7 +60,7 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Zone 1: Brand & Current Workspace */}
           <div className="flex items-center gap-3 shrink-0">
             <img
-              src="/assets/aistudio/_____20261113_76ad5948.png"
+              src={brandLogoUrl}
               alt="SpecForge"
               className="w-8 h-8 rounded-lg object-cover shadow-2xs shrink-0"
             />

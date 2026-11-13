@@ -48,7 +48,7 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
         type: 'text',
         group: 'basic',
         defaultValue: 'SPEC-PIPE-2026-001',
-        description: 'オーダーNo.・機器番号から自動生成'
+        description: '客先コード・機器番号から自動生成'
       },
       {
         id: 'f-date',
@@ -257,7 +257,7 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
         type: 'text',
         group: 'basic',
         defaultValue: 'SPEC-VALVE-2026-002',
-        description: 'オーダーNo.・機器番号から自動生成'
+        description: '客先コード・機器番号から自動生成'
       },
       {
         id: 'f-date',
@@ -460,7 +460,7 @@ export const DEFAULT_TEMPLATES: SpecTemplate[] = [
         type: 'text',
         group: 'basic',
         defaultValue: 'SPEC-MECH-2026-003',
-        description: 'オーダーNo.・機器番号から自動生成'
+        description: '客先コード・機器番号から自動生成'
       },
       {
         id: 'f-date',

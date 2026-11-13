@@ -43,7 +43,7 @@ export const BASIC_FIELD_DEFS: BasicFieldDefinition[] = [
     label: '仕様書番号',
     defaultCell: 'C4',
     type: 'text',
-    description: 'オーダーNo.・機器番号から自動生成',
+    description: '客先コード・機器番号から自動生成',
     matchLabels: ['仕様書番号', '文書番号'],
     matchIds: ['f-docno', 'f-basic-docno']
   },

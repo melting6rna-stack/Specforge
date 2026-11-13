@@ -370,9 +370,9 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
                     <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800">
                       オーダーNo.: {currentProject.orderNo || currentProject.code}
                     </span>
-                    {(currentProject.clientNumber || currentProject.clientNumberPart1 || currentProject.clientNumberPart2) && (
+                    {currentProject.code && currentProject.code !== (currentProject.orderNo || '') && (
                       <span className="text-[10px] font-mono px-1.5 py-0.5 rounded font-semibold bg-slate-800 text-slate-300">
-                        客先No: {currentProject.clientNumber || `【${currentProject.clientNumberPart1 || ''}】-【${currentProject.clientNumberPart2 || ''}】`}
+                        客先コード: {currentProject.code}
                       </span>
                     )}
                   </div>
@@ -687,7 +687,7 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
 
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1 flex items-center justify-between">
-                    <span>管理サブコード <span className="text-slate-400 font-normal">(任意)</span></span>
+                    <span>客先コード <span className="text-slate-400 font-normal">(任意)</span></span>
                     <span className="text-[10px] text-slate-400 font-normal font-mono">[前半] - [後半] (例: 20345-001)</span>
                   </label>
                   <div className="flex items-center gap-1.5">
