@@ -411,31 +411,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
         </div>
 
         {/* Global Admin Actions */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Import Mapping Asset JSON */}
-          <label className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer">
-            <Upload className="w-3.5 h-3.5 text-indigo-600" />
-            <span>マッピング定義 (JSON) を読込</span>
-            <input
-              type="file"
-              ref={jsonAssetInputRef}
-              accept=".json,.specmap.json"
-              onChange={handleImportAsset}
-              className="hidden"
-            />
-          </label>
-
-          {/* Export Current Asset */}
-          <button
-            onClick={() => currentTemplate && handleExportAsset(currentTemplate)}
-            disabled={!currentTemplate}
-            className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-            title="現在のマッピング定義をJSONアセットとして書き出し"
-          >
-            <Download className="w-3.5 h-3.5 text-slate-600" />
-            <span>マッピング定義をJSON出力</span>
-          </button>
-
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
           <button
             onClick={handleCreateNewTemplate}
             className="px-3.5 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
@@ -529,13 +505,26 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
               <p className="text-xs text-slate-500">
                 「新規テンプレート作成」または「マッピング定義 (JSON) を読込」からテンプレートを追加してください。
               </p>
-              <button
-                onClick={handleCreateNewTemplate}
-                className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>新規テンプレート作成</span>
-              </button>
+              <div className="flex items-center justify-center gap-2 flex-wrap">
+                <label className="px-3.5 py-2 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors inline-flex items-center gap-1.5 shadow-2xs cursor-pointer">
+                  <Upload className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>マッピング定義 (JSON) を読込</span>
+                  <input
+                    type="file"
+                    ref={jsonAssetInputRef}
+                    accept=".json,.specmap.json"
+                    onChange={handleImportAsset}
+                    className="hidden"
+                  />
+                </label>
+                <button
+                  onClick={handleCreateNewTemplate}
+                  className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>新規テンプレート作成</span>
+                </button>
+              </div>
             </div>
           ) : (
             <>
@@ -1149,7 +1138,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
           {/* Sub Tab 3: JSON Asset View */}
           {activeTabSub === 'asset' && (
             <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-3 text-xs">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2">
                 <div>
                   <h2 className="text-xs font-bold text-slate-900">
                     マッピング定義アセット JSON
@@ -1158,13 +1147,26 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                     このJSONファイルを保存・エクスポートすることで、他のエンジニアや他システムと完全に同じ仕様書レイアウトを共有できます。
                   </p>
                 </div>
-                <button
-                  onClick={() => handleExportAsset(activeTpl)}
-                  className="px-3.5 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>.specmap.json をダウンロード</span>
-                </button>
+                <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                  <label className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer">
+                    <Upload className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>マッピング定義 (JSON) を読込</span>
+                    <input
+                      type="file"
+                      ref={jsonAssetInputRef}
+                      accept=".json,.specmap.json"
+                      onChange={handleImportAsset}
+                      className="hidden"
+                    />
+                  </label>
+                  <button
+                    onClick={() => handleExportAsset(activeTpl)}
+                    className="px-3.5 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>.specmap.json をダウンロード</span>
+                  </button>
+                </div>
               </div>
 
               <div className="bg-slate-900 text-slate-100 p-3 rounded-lg font-mono text-[11px] overflow-x-auto max-h-96">
