@@ -24,6 +24,7 @@ interface HeaderProps {
   isSyncing: boolean;
   onManualSync: () => void;
   onRelinkFile: () => void;
+  onReconnectFile?: () => void;
   hasUnsavedChanges?: boolean;
   onManualSave?: () => void;
   isSaving?: boolean;
@@ -41,6 +42,7 @@ export const Header: React.FC<HeaderProps> = ({
   isSyncing,
   onManualSync,
   onRelinkFile,
+  onReconnectFile,
   hasUnsavedChanges,
   onManualSave,
   isSaving,
@@ -129,12 +131,23 @@ export const Header: React.FC<HeaderProps> = ({
             {currentProject?.isLinkError ? (
               <button
                 onClick={onRelinkFile}
-                className="flex items-center gap-1.5 text-[11px] font-semibold text-red-700 bg-red-50 hover:bg-red-100 border border-red-300 rounded-md px-2.5 py-1 shadow-2xs transition-colors"
+                className="flex items-center gap-1.5 text-[11px] font-semibold text-red-700 bg-red-50 hover:bg-red-100 border border-red-300 rounded-md px-2.5 py-1 shadow-2xs transition-colors cursor-pointer"
                 title={currentProject.linkErrorMessage || '紐づけ元のJSONファイルが見つかりません。再選択してください。'}
               >
                 <AlertTriangle className="w-3.5 h-3.5 text-red-600 animate-pulse" />
                 <span className="hidden sm:inline">JSON未検出 (再指定)</span>
                 <span className="sm:hidden">再指定</span>
+              </button>
+            ) : currentProject?.needsLinkPermission && currentProject?.linkedJsonFileName ? (
+              <button
+                onClick={() => (onReconnectFile ? onReconnectFile() : onManualSync())}
+                disabled={isSyncing}
+                className="flex items-center gap-1.5 text-[11px] font-semibold text-sky-800 bg-sky-50 hover:bg-sky-100 border border-sky-300 rounded-md px-2.5 py-1 shadow-2xs transition-colors cursor-pointer"
+                title={`「${currentProject.linkedJsonFileName}」との紐づけは維持されています。クリックしてアクセスを許可・連動再開してください（ファイル再選択不要）`}
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-sky-600 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span className="font-mono truncate max-w-[110px]">{currentProject.linkedJsonFileName}</span>
+                <span className="hidden sm:inline text-sky-700 font-bold">· 連動再開</span>
               </button>
             ) : currentProject?.linkedJsonFileName ? (
               <div className="flex items-center gap-1 text-[11px] font-medium text-emerald-800 bg-emerald-50 border border-emerald-300 rounded-md px-2.5 py-1 shadow-2xs">
@@ -144,7 +157,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
                 <button
                   onClick={onManualSync}
-                  className="p-0.5 hover:bg-emerald-100 text-emerald-700 rounded transition-colors ml-0.5"
+                  className="p-0.5 hover:bg-emerald-100 text-emerald-700 rounded transition-colors ml-0.5 cursor-pointer"
                   title="紐づけJSONファイルから最新状態を再同期"
                 >
                   <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />

@@ -41,6 +41,7 @@ interface ProjectSummaryTabProps {
   ) => void;
   onUpdateProject?: (updated: ProjectWorkspace) => void;
   onRelinkProjectFile: (projectId: string) => void;
+  onReconnectProjectFile?: (projectId: string) => void;
   onSyncProjectFile: (projectId: string) => void;
   onExportProjectBackup: () => void;
   onImportProjectBackup: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -87,6 +88,7 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
   onAddProjectWithFile,
   onUpdateProject,
   onRelinkProjectFile,
+  onReconnectProjectFile,
   onSyncProjectFile,
   onExportProjectBackup,
   onImportProjectBackup,
@@ -404,6 +406,8 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
                 <div className="flex items-center gap-1.5 truncate max-w-[200px]">
                   {currentProject.isLinkError ? (
                     <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                  ) : currentProject.needsLinkPermission ? (
+                    <RefreshCw className="w-3.5 h-3.5 text-sky-300 shrink-0" />
                   ) : (
                     <HardDrive className="w-3.5 h-3.5 text-indigo-300 shrink-0" />
                   )}
@@ -480,6 +484,8 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
         <div className={`p-4 rounded-xl border shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors ${
           currentProject.isLinkError
             ? 'bg-red-50/90 border-red-300 text-red-900'
+            : currentProject.needsLinkPermission && currentProject.linkedJsonFileName
+            ? 'bg-sky-50/90 border-sky-300 text-sky-950'
             : currentProject.linkedJsonFileName
             ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
             : 'bg-amber-50/80 border-amber-200 text-amber-950'
@@ -487,6 +493,8 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
           <div className="flex items-start gap-3">
             {currentProject.isLinkError ? (
               <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5 animate-pulse" />
+            ) : currentProject.needsLinkPermission && currentProject.linkedJsonFileName ? (
+              <RefreshCw className={`w-5 h-5 text-sky-600 shrink-0 mt-0.5 ${isSyncing ? 'animate-spin' : ''}`} />
             ) : currentProject.linkedJsonFileName ? (
               <HardDrive className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
             ) : (
@@ -497,14 +505,18 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
               <div className="flex items-center gap-2">
                 <span className="font-bold text-xs">
                   {currentProject.isLinkError
-                    ? '【参照エラー】紐づけ元のJSONファイルが見つかりません'
+                    ? '【参照エラー】紐づけ元のJSONファイルにアクセスできません'
+                    : currentProject.needsLinkPermission && currentProject.linkedJsonFileName
+                    ? 'JSON紐づけ維持中（アクセス許可の再開待ち）'
                     : currentProject.linkedJsonFileName
                     ? '正本JSONデータベースと連動中 (直接読み書き)'
                     : 'JSONファイルが未紐づけです'}
                 </span>
                 <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${
                   currentProject.isLinkError 
-                    ? 'bg-red-200 text-red-800 font-bold' 
+                    ? 'bg-red-200 text-red-800 font-bold'
+                    : currentProject.needsLinkPermission && currentProject.linkedJsonFileName
+                    ? 'bg-sky-200 text-sky-900 font-bold'
                     : currentProject.linkedJsonFileName 
                     ? 'bg-emerald-200 text-emerald-800' 
                     : 'bg-amber-200 text-amber-800'
@@ -518,9 +530,13 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
                   <span className="text-red-700 font-medium">
                     {currentProject.linkErrorMessage || `ファイル「${currentProject.linkedJsonFileName}」が移動または削除されたか、アクセス権限が失われました。下のボタンから再度ファイルを選択してください。`}
                   </span>
+                ) : currentProject.needsLinkPermission && currentProject.linkedJsonFileName ? (
+                  <span className="text-sky-900">
+                    紐づけファイル: <strong className="font-mono">{currentProject.linkedJsonFileName}</strong> — ブラウザ更新・新規ウィンドウ起動後はセキュリティ仕様により、右のボタンを1クリックして連動を再開してください（ファイル再選択は不要です）。
+                  </span>
                 ) : currentProject.linkedJsonFileName ? (
                   <span>
-                    紐づけファイル: <strong className="font-mono text-emerald-900">{currentProject.linkedJsonFileName}</strong> · 最終同期: {currentProject.linkedJsonLastSync || 'リアルタイム'} (5分毎に自動更新)
+                    紐づけファイル: <strong className="font-mono text-emerald-900">{currentProject.linkedJsonFileName}</strong> · 最終同期: {currentProject.linkedJsonLastSync || 'リアルタイム'}
                   </span>
                 ) : (
                   <span>
@@ -536,18 +552,38 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
               <button
                 type="button"
                 onClick={() => onRelinkProjectFile(currentProject.id)}
-                className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors"
+                className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
               >
                 <HardDrive className="w-3.5 h-3.5" />
                 <span>JSONファイルを再指定・再紐づけ</span>
               </button>
+            ) : currentProject.needsLinkPermission && currentProject.linkedJsonFileName ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => (onReconnectProjectFile ? onReconnectProjectFile(currentProject.id) : onSyncProjectFile(currentProject.id))}
+                  disabled={isSyncing}
+                  className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-md text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                  <span>アクセスを許可して連動再開</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRelinkProjectFile(currentProject.id)}
+                  className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-md text-xs font-medium transition-colors cursor-pointer"
+                  title="紐づけるファイルパスを変更"
+                >
+                  <span>ファイル変更</span>
+                </button>
+              </>
             ) : currentProject.linkedJsonFileName ? (
               <>
                 <button
                   type="button"
                   onClick={() => onSyncProjectFile(currentProject.id)}
                   disabled={isSyncing}
-                  className="px-3 py-1.5 bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors shadow-2xs"
+                  className="px-3 py-1.5 bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
                   title="共有ファイルから最新データを読み直す"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-emerald-600' : ''}`} />
@@ -556,7 +592,7 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
                 <button
                   type="button"
                   onClick={() => onRelinkProjectFile(currentProject.id)}
-                  className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-md text-xs font-medium transition-colors"
+                  className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-md text-xs font-medium transition-colors cursor-pointer"
                   title="紐づけるファイルパスを変更"
                 >
                   <span>ファイル変更</span>

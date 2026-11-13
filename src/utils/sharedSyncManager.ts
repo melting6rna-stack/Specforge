@@ -619,23 +619,77 @@ function normalizeSingleItem(
   };
 }
 
+export class PermissionRequiredError extends Error {
+  constructor(message = 'ファイルへのアクセス許可が必要です。') {
+    super(message);
+    this.name = 'PermissionRequiredError';
+  }
+}
+
+export class FileMissingError extends Error {
+  constructor(message = '紐づけ元のJSONファイルが見つかりません。ファイルが移動または削除された可能性があります。') {
+    super(message);
+    this.name = 'FileMissingError';
+  }
+}
+
+/**
+ * Checks the current permission state of a FileSystemFileHandle without prompting.
+ */
+export async function checkFileHandlePermission(
+  handle: FileSystemFileHandle,
+  mode: 'read' | 'readwrite' = 'read'
+): Promise<'granted' | 'prompt' | 'denied'> {
+  try {
+    if (typeof (handle as any).queryPermission === 'function') {
+      return await (handle as any).queryPermission({ mode });
+    }
+    return 'granted';
+  } catch {
+    return 'prompt';
+  }
+}
+
+/**
+ * Requests permission on an already-linked FileSystemFileHandle (MUST be called from a user gesture).
+ */
+export async function requestFileHandlePermission(
+  handle: FileSystemFileHandle,
+  mode: 'read' | 'readwrite' = 'readwrite'
+): Promise<'granted' | 'prompt' | 'denied'> {
+  const current = await checkFileHandlePermission(handle, mode);
+  if (current === 'granted') return 'granted';
+  if (typeof (handle as any).requestPermission === 'function') {
+    return await (handle as any).requestPermission({ mode });
+  }
+  return 'granted';
+}
+
 /**
  * Reads database JSON from a linked FileSystemFileHandle with full error capture.
  */
 export async function readFromProjectHandle(
   handle: FileSystemFileHandle,
   projectId: string,
-  defaultCategoryId: string
+  defaultCategoryId: string,
+  options?: { allowPromptRequest?: boolean }
 ): Promise<{
   payload: DatabasePayload;
   fileName: string;
 }> {
   try {
-    const perm = await (handle as any).queryPermission({ mode: 'read' });
+    const allowPrompt = options?.allowPromptRequest ?? false;
+    const perm = await checkFileHandlePermission(handle, 'read');
     if (perm !== 'granted') {
-      const req = await (handle as any).requestPermission({ mode: 'read' });
+      if (!allowPrompt) {
+        throw new PermissionRequiredError('ブラウザの更新または新規ウィンドウ起動のため、ファイルへの再アクセス許可が必要です。');
+      }
+      // Request readwrite on user gesture so subsequent writes also succeed without a second prompt
+      const req = await requestFileHandlePermission(handle, 'readwrite').catch(async () => {
+        return await requestFileHandlePermission(handle, 'read');
+      });
       if (req !== 'granted') {
-        throw new Error('JSONファイルへの読み取り権限が拒否されました。再度ファイルを選択してください。');
+        throw new PermissionRequiredError('JSONファイルへのアクセス許可が保留または拒否されました。もう一度クリックして許可してください。');
       }
     }
 
@@ -672,11 +726,14 @@ export async function readFromProjectHandle(
       fileName: file.name
     };
   } catch (err: any) {
-    if (err.name === 'NotFoundError' || err.message?.includes('not found') || err.message?.includes('A requested file or directory could not be found')) {
-      throw new Error('紐づけ元のJSONファイルが見つかりません。ファイルが移動または削除された可能性があります。');
+    if (err instanceof PermissionRequiredError || err instanceof FileMissingError) {
+      throw err;
     }
-    if (err.name === 'NotAllowedError' || err.message?.includes('permission')) {
-      throw new Error('ファイルへのアクセス権限がありません。再度ファイルを選択してください。');
+    if (err.name === 'NotFoundError' || err.message?.includes('not found') || err.message?.includes('A requested file or directory could not be found')) {
+      throw new FileMissingError('紐づけ元のJSONファイルが見つかりません。ファイルが移動または削除された可能性があります。');
+    }
+    if (err.name === 'SecurityError' || err.name === 'NotAllowedError' || err.message?.toLowerCase().includes('permission') || err.message?.includes('activation')) {
+      throw new PermissionRequiredError('ファイルへのアクセス許可が必要です。ボタンをクリックして連動を再開してください。');
     }
     throw err;
   }
@@ -694,14 +751,19 @@ export async function writeToProjectHandle(
   handle: FileSystemFileHandle,
   payload: DatabasePayload,
   schemaType?: 'tokki-equipment' | 'specforge-v2' | 'generic',
-  project?: ProjectWorkspace
+  project?: ProjectWorkspace,
+  options?: { allowPromptRequest?: boolean }
 ): Promise<void> {
   try {
-    const perm = await (handle as any).queryPermission({ mode: 'readwrite' });
+    const allowPrompt = options?.allowPromptRequest ?? false;
+    const perm = await checkFileHandlePermission(handle, 'readwrite');
     if (perm !== 'granted') {
-      const req = await (handle as any).requestPermission({ mode: 'readwrite' });
+      if (!allowPrompt) {
+        throw new PermissionRequiredError('JSONファイルへの書き込みには再アクセス許可が必要です。');
+      }
+      const req = await requestFileHandlePermission(handle, 'readwrite');
       if (req !== 'granted') {
-        throw new Error('JSONファイルへの書き込み権限が許可されませんでした。');
+        throw new PermissionRequiredError('JSONファイルへの書き込み許可が得られませんでした。もう一度お試しください。');
       }
     }
 
@@ -850,8 +912,14 @@ export async function writeToProjectHandle(
     await writable.write(JSON.stringify(fileContent, null, 2));
     await writable.close();
   } catch (err: any) {
-    if (err.name === 'NotFoundError' || err.message?.includes('not found')) {
-      throw new Error('書き込み先のJSONファイルが見つかりません。ファイルが移動または削除された可能性があります。');
+    if (err instanceof PermissionRequiredError || err instanceof FileMissingError) {
+      throw err;
+    }
+    if (err.name === 'NotFoundError' || err.message?.includes('not found') || err.message?.includes('A requested file or directory could not be found')) {
+      throw new FileMissingError('書き込み先のJSONファイルが見つかりません。ファイルが移動または削除された可能性があります。');
+    }
+    if (err.name === 'SecurityError' || err.name === 'NotAllowedError' || err.message?.toLowerCase().includes('permission') || err.message?.includes('activation')) {
+      throw new PermissionRequiredError('JSONファイルへの書き込み許可が必要です。保存または再接続ボタンをクリックして許可してください。');
     }
     throw err;
   }

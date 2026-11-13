@@ -175,7 +175,8 @@ export interface ProjectWorkspace {
   createdAt: string;
   linkedJsonFileName?: string; // 紐づけられているJSONファイル名 (例: "PlantSpec_2026.json")
   linkedJsonLastSync?: string; // 最終読書同期日時
-  isLinkError?: boolean; // 紐づけ元ファイルが見つからない等のエラー状態
+  needsLinkPermission?: boolean; // ブラウザ更新・新ウィンドウでアクセス再許可待ちの状態（紐づけ自体は維持）
+  isLinkError?: boolean; // 紐づけ元ファイルが消失した等のエラー状態
   linkErrorMessage?: string; // エラーメッセージ
   schemaType?: 'tokki-equipment' | 'specforge-v2' | 'generic'; // スキーマ種別
   rawDocument?: any; // 特記仕様書スキーマの document オブジェクト

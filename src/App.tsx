@@ -16,20 +16,28 @@ import { INITIAL_PROJECTS, INITIAL_CATEGORIES, INITIAL_ITEMS } from './data/samp
 import { parseEquipmentExcel } from './utils/excelTemplateParser';
 import { 
   DatabasePayload,
+  PermissionRequiredError,
+  FileMissingError,
+  checkFileHandlePermission,
+  requestFileHandlePermission,
   saveFileHandleForProject,
   getSavedFileHandleForProject,
   removeSavedFileHandleForProject,
   readFromProjectHandle,
   writeToProjectHandle
 } from './utils/sharedSyncManager';
-import { Bell, AlertTriangle, RefreshCw, HardDrive, Save } from 'lucide-react';
+import { Bell, AlertTriangle, RefreshCw, HardDrive, Save, Link2 } from 'lucide-react';
+
+function sanitizeProjectsForStorage(list: ProjectWorkspace[]): ProjectWorkspace[] {
+  return list.map(({ isLinkError, linkErrorMessage, needsLinkPermission, ...rest }) => rest);
+}
 
 export default function App() {
-  // 1. Projects state
+  // 1. Projects state (always clear transient runtime permission/error flags on load)
   const [projects, setProjects] = useState<ProjectWorkspace[]>(() => {
     try {
       const saved = localStorage.getItem('specforge_projects_v2');
-      if (saved) return JSON.parse(saved);
+      if (saved) return sanitizeProjectsForStorage(JSON.parse(saved));
     } catch (e) {
       console.warn('Failed to parse saved projects', e);
     }
@@ -194,8 +202,9 @@ export default function App() {
   };
 
   // Local storage persistence (Local-first & offline resilient)
+  // Strip transient runtime flags so reload/new windows don't inherit stale error states
   useEffect(() => {
-    localStorage.setItem('specforge_projects_v2', JSON.stringify(projects));
+    localStorage.setItem('specforge_projects_v2', JSON.stringify(sanitizeProjectsForStorage(projects)));
   }, [projects]);
 
   useEffect(() => {
@@ -205,6 +214,37 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('specforge_items_v2', JSON.stringify(items));
   }, [items]);
+
+  // Cross-window synchronization via storage events (keeps multiple open windows in sync)
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (!e.newValue) return;
+      try {
+        if (e.key === 'specforge_projects_v2') {
+          const incoming = sanitizeProjectsForStorage(JSON.parse(e.newValue));
+          setProjects(prev => incoming.map(inc => {
+            const existing = prev.find(p => p.id === inc.id);
+            return existing ? {
+              ...inc,
+              needsLinkPermission: existing.needsLinkPermission,
+              isLinkError: existing.isLinkError,
+              linkErrorMessage: existing.linkErrorMessage
+            } : inc;
+          }));
+        } else if (e.key === 'specforge_items_v2') {
+          setItems(JSON.parse(e.newValue));
+        } else if (e.key === 'specforge_categories_v3') {
+          setCategories(JSON.parse(e.newValue));
+        } else if (e.key === 'specforge_templates_v2') {
+          setTemplates(JSON.parse(e.newValue));
+        }
+      } catch (err) {
+        console.warn('Failed to sync storage event across windows', err);
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
 
   // Load active project file handle from IndexedDB when activeProjectId changes
   useEffect(() => {
@@ -218,10 +258,12 @@ export default function App() {
 
       if (handle) {
         try {
-          const { payload } = await readFromProjectHandle(
+          // Never requestPermission automatically without user gesture on mount/reload/new window
+          const { payload, fileName } = await readFromProjectHandle(
             handle, 
             activeProjectId, 
-            `cat-${activeProjectId}-etc`
+            `cat-${activeProjectId}-etc`,
+            { allowPromptRequest: false }
           );
           if (isCancelled) return;
 
@@ -250,6 +292,8 @@ export default function App() {
             if (p.id === activeProjectId) {
               return {
                 ...p,
+                linkedJsonFileName: fileName || p.linkedJsonFileName,
+                needsLinkPermission: false,
                 isLinkError: false,
                 linkErrorMessage: undefined,
                 schemaType: payload.schemaType || p.schemaType,
@@ -262,18 +306,48 @@ export default function App() {
           setHasUnsavedChanges(false);
         } catch (err: any) {
           if (isCancelled) return;
-          console.warn('Failed to read from linked JSON file for project', activeProjectId, err);
-          setProjects(prev => prev.map(p => {
-            if (p.id === activeProjectId) {
-              return {
-                ...p,
-                isLinkError: true,
-                linkErrorMessage: err.message || '紐づけ元のJSONファイルが見つかりません。'
-              };
-            }
-            return p;
-          }));
+          if (err instanceof PermissionRequiredError) {
+            // Link IS preserved in IndexedDB! Browser simply reset runtime permission to 'prompt' on reload/new window.
+            setProjects(prev => prev.map(p => {
+              if (p.id === activeProjectId) {
+                return {
+                  ...p,
+                  linkedJsonFileName: handle.name || p.linkedJsonFileName,
+                  needsLinkPermission: true,
+                  isLinkError: false,
+                  linkErrorMessage: undefined
+                };
+              }
+              return p;
+            }));
+          } else {
+            console.warn('Failed to read from linked JSON file for project', activeProjectId, err);
+            setProjects(prev => prev.map(p => {
+              if (p.id === activeProjectId) {
+                return {
+                  ...p,
+                  needsLinkPermission: false,
+                  isLinkError: true,
+                  linkErrorMessage: err.message || '紐づけ元のJSONファイルが見つかりません。'
+                };
+              }
+              return p;
+            }));
+          }
         }
+      } else {
+        // No handle in IndexedDB for this projectId
+        setProjects(prev => prev.map(p => {
+          if (p.id === activeProjectId && p.linkedJsonFileName) {
+            return {
+              ...p,
+              needsLinkPermission: false,
+              isLinkError: true,
+              linkErrorMessage: `このブラウザ環境には「${p.linkedJsonFileName}」のファイル参照が保持されていません。「ファイルの再指定」からJSONファイルを選択してください。`
+            };
+          }
+          return p;
+        }));
       }
     }
 
@@ -284,19 +358,62 @@ export default function App() {
     };
   }, [activeProjectId]);
 
+  // Re-check permission silently when window regains focus (e.g. if granted in browser/another tab)
+  useEffect(() => {
+    const handleWindowFocus = async () => {
+      const handle = activeFileHandleRef.current;
+      if (!handle || !activeProjectId) return;
+      const prj = projects.find(p => p.id === activeProjectId);
+      if (!prj?.needsLinkPermission) return;
+
+      const perm = await checkFileHandlePermission(handle, 'read');
+      if (perm === 'granted') {
+        try {
+          const { payload, fileName } = await readFromProjectHandle(
+            handle,
+            activeProjectId,
+            `cat-${activeProjectId}-etc`,
+            { allowPromptRequest: false }
+          );
+          if (!hasUnsavedChanges && payload.items && payload.items.length > 0) {
+            setItems(prev => {
+              const otherItems = prev.filter(it => it.projectId !== activeProjectId);
+              return [...otherItems, ...payload.items];
+            });
+          }
+          setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+            ...p,
+            linkedJsonFileName: fileName || p.linkedJsonFileName,
+            needsLinkPermission: false,
+            isLinkError: false,
+            linkErrorMessage: undefined,
+            linkedJsonLastSync: new Date().toLocaleTimeString('ja-JP')
+          } : p));
+        } catch {
+          // ignore silent focus check errors
+        }
+      }
+    };
+    window.addEventListener('focus', handleWindowFocus);
+    return () => window.removeEventListener('focus', handleWindowFocus);
+  }, [activeProjectId, projects, hasUnsavedChanges]);
+
   // Helper to persist active project's items & categories to its linked JSON file handle
   const persistItemsToLinkedJson = useCallback(async (
     targetProjectId: string, 
     updatedItemsForProject: EquipmentItem[],
-    customCategories?: Category[]
-  ) => {
-    let handle = activeFileHandleRef.current;
+    customCategories?: Category[],
+    options?: { allowPromptRequest?: boolean; throwOnError?: boolean }
+  ): Promise<boolean> => {
+    let handle = targetProjectId === activeProjectId ? activeFileHandleRef.current : null;
     if (!handle) {
       handle = await getSavedFileHandleForProject(targetProjectId);
-      activeFileHandleRef.current = handle;
+      if (targetProjectId === activeProjectId) {
+        activeFileHandleRef.current = handle;
+      }
     }
 
-    if (!handle) return;
+    if (!handle) return false;
 
     try {
       const prj = projects.find(p => p.id === targetProjectId) || currentProject;
@@ -313,13 +430,16 @@ export default function App() {
         rawDocument: prj?.rawDocument
       };
 
-      await writeToProjectHandle(handle, payload, prj?.schemaType, prj);
+      await writeToProjectHandle(handle, payload, prj?.schemaType, prj, {
+        allowPromptRequest: options?.allowPromptRequest ?? false
+      });
 
       const nowTime = new Date().toLocaleTimeString('ja-JP');
       setProjects(prev => prev.map(p => {
         if (p.id === targetProjectId) {
           return {
             ...p,
+            needsLinkPermission: false,
             isLinkError: false,
             linkErrorMessage: undefined,
             linkedJsonLastSync: nowTime
@@ -327,39 +447,64 @@ export default function App() {
         }
         return p;
       }));
+      return true;
     } catch (err: any) {
+      if (err instanceof PermissionRequiredError) {
+        // Keep link intact; mark as needing user permission click instead of showing File Not Found error
+        setProjects(prev => prev.map(p => {
+          if (p.id === targetProjectId) {
+            return {
+              ...p,
+              needsLinkPermission: true,
+              isLinkError: false,
+              linkErrorMessage: undefined
+            };
+          }
+          return p;
+        }));
+        if (options?.throwOnError) throw err;
+        return false;
+      }
+
       console.warn('Failed writing back to linked JSON file:', err);
       setProjects(prev => prev.map(p => {
         if (p.id === targetProjectId) {
           return {
             ...p,
+            needsLinkPermission: false,
             isLinkError: true,
             linkErrorMessage: err.message || 'JSONファイルへの書き込みに失敗しました。ファイルが移動または削除された可能性があります。'
           };
         }
         return p;
       }));
+      if (options?.throwOnError) throw err;
+      return false;
     }
-  }, [categories, currentProject, projectCategories, projects, templates]);
+  }, [activeProjectId, categories, currentProject, projectCategories, projects, templates]);
 
-  // Synchronize active project from its linked JSON file
+  // Synchronize active project from its linked JSON file (user-triggered)
   const performSyncProject = useCallback(async (targetProjectId: string, isAuto = false) => {
     setIsSyncing(true);
     try {
-      let handle = activeFileHandleRef.current;
+      // Access ref synchronously first to preserve user activation for requestPermission
+      let handle = targetProjectId === activeProjectId ? activeFileHandleRef.current : null;
       if (!handle) {
         handle = await getSavedFileHandleForProject(targetProjectId);
-        activeFileHandleRef.current = handle;
+        if (targetProjectId === activeProjectId) {
+          activeFileHandleRef.current = handle;
+        }
       }
 
       if (!handle) {
-        throw new Error('紐づけされたJSONファイルが存在しません。');
+        throw new FileMissingError('このブラウザ環境には紐づけされたJSONファイルの参照が存在しません。ファイルを再指定してください。');
       }
 
       const { payload, fileName } = await readFromProjectHandle(
         handle, 
         targetProjectId, 
-        `cat-${targetProjectId}-etc`
+        `cat-${targetProjectId}-etc`,
+        { allowPromptRequest: !isAuto }
       );
 
       if (payload && payload.items) {
@@ -388,34 +533,147 @@ export default function App() {
               linkedJsonLastSync: nowStr,
               schemaType: payload.schemaType || p.schemaType,
               rawDocument: payload.rawDocument || p.rawDocument,
+              needsLinkPermission: false,
               isLinkError: false,
               linkErrorMessage: undefined
             };
           }
           return p;
         }));
+        setHasUnsavedChanges(false);
 
-        if (isAuto) {
-          setSyncNotice(`「${fileName}」の最新データと自動同期しました (${nowStr})`);
-          setTimeout(() => setSyncNotice(''), 5000);
-        }
+        setSyncNotice(
+          isAuto
+            ? `「${fileName}」の最新データと自動同期しました (${nowStr})`
+            : `「${fileName}」から最新データを再同期しました (${nowStr})`
+        );
+        setTimeout(() => setSyncNotice(''), 5000);
       }
     } catch (err: any) {
-      console.warn('Project sync failed:', err);
-      setProjects(prev => prev.map(p => {
-        if (p.id === targetProjectId) {
-          return {
-            ...p,
-            isLinkError: true,
-            linkErrorMessage: err.message || '紐づけ元のJSONファイルが見つかりません。'
-          };
-        }
-        return p;
-      }));
+      if (err instanceof PermissionRequiredError) {
+        setProjects(prev => prev.map(p => p.id === targetProjectId ? {
+          ...p,
+          needsLinkPermission: true,
+          isLinkError: false,
+          linkErrorMessage: undefined
+        } : p));
+      } else {
+        console.warn('Project sync failed:', err);
+        setProjects(prev => prev.map(p => {
+          if (p.id === targetProjectId) {
+            return {
+              ...p,
+              needsLinkPermission: false,
+              isLinkError: true,
+              linkErrorMessage: err.message || '紐づけ元のJSONファイルが見つかりません。'
+            };
+          }
+          return p;
+        }));
+      }
     } finally {
       setIsSyncing(false);
     }
-  }, []);
+  }, [activeProjectId]);
+
+  // 1-click reconnect using existing IndexedDB FileSystemFileHandle (no file picker needed!)
+  const handleReconnectProjectFile = useCallback(async (targetProjectId: string) => {
+    setIsSyncing(true);
+    try {
+      // Grab ref synchronously so requestPermission receives valid user activation!
+      let handle = targetProjectId === activeProjectId ? activeFileHandleRef.current : null;
+      if (!handle) {
+        handle = await getSavedFileHandleForProject(targetProjectId);
+        if (targetProjectId === activeProjectId) {
+          activeFileHandleRef.current = handle;
+        }
+      }
+
+      if (!handle) {
+        setIsSyncing(false);
+        await handleRelinkProjectFile(targetProjectId);
+        return;
+      }
+
+      const perm = await requestFileHandlePermission(handle, 'readwrite').catch(async () => {
+        return await requestFileHandlePermission(handle, 'read');
+      });
+
+      if (perm !== 'granted') {
+        setSyncNotice('ファイルへのアクセスが許可されませんでした。ブラウザの許可ダイアログで「許可 / 編集」を選択してください。');
+        setTimeout(() => setSyncNotice(''), 5000);
+        return;
+      }
+
+      if (hasUnsavedChanges) {
+        // Keep local edits and flush them immediately to the linked JSON file
+        const projectItems = items.filter(it => it.projectId === targetProjectId);
+        const projectCats = categories.filter(c => c.projectId === targetProjectId);
+        const saved = await persistItemsToLinkedJson(targetProjectId, projectItems, projectCats, {
+          allowPromptRequest: true,
+          throwOnError: true
+        });
+        if (saved) {
+          setHasUnsavedChanges(false);
+          setSyncNotice(`「${handle.name}」と再接続し、未保存の編集データをJSONへ保存しました。`);
+          setTimeout(() => setSyncNotice(''), 5000);
+        }
+      } else {
+        // Sync latest from disk
+        const { payload, fileName } = await readFromProjectHandle(
+          handle,
+          targetProjectId,
+          `cat-${targetProjectId}-etc`,
+          { allowPromptRequest: false }
+        );
+
+        if (payload && payload.items) {
+          setItems(prev => {
+            const otherItems = prev.filter(it => it.projectId !== targetProjectId);
+            return [...otherItems, ...payload.items];
+          });
+        }
+        if (payload && payload.categories && payload.categories.length > 0) {
+          const scopedCats = payload.categories.map(c => ({
+            ...c,
+            projectId: targetProjectId
+          }));
+          setCategories(prev => {
+            const otherProjectsCats = prev.filter(c => c.projectId && c.projectId !== targetProjectId);
+            return [...otherProjectsCats, ...scopedCats];
+          });
+        }
+
+        const nowStr = new Date().toLocaleTimeString('ja-JP');
+        setProjects(prev => prev.map(p => p.id === targetProjectId ? {
+          ...p,
+          linkedJsonFileName: fileName,
+          linkedJsonLastSync: nowStr,
+          schemaType: payload.schemaType || p.schemaType,
+          rawDocument: payload.rawDocument || p.rawDocument,
+          needsLinkPermission: false,
+          isLinkError: false,
+          linkErrorMessage: undefined
+        } : p));
+
+        setSyncNotice(`「${fileName}」との紐づけ・自動同期を再開しました (${nowStr})`);
+        setTimeout(() => setSyncNotice(''), 5000);
+      }
+    } catch (err: any) {
+      if (err instanceof FileMissingError || err.name === 'NotFoundError') {
+        setProjects(prev => prev.map(p => p.id === targetProjectId ? {
+          ...p,
+          needsLinkPermission: false,
+          isLinkError: true,
+          linkErrorMessage: err.message || '紐づけ元のJSONファイルが見つかりません。'
+        } : p));
+      } else if (!(err instanceof PermissionRequiredError)) {
+        alert(`再接続に失敗しました: ${err.message || 'エラーが発生しました'}`);
+      }
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [activeProjectId, categories, hasUnsavedChanges, items, persistItemsToLinkedJson]);
 
   // NOTE: Periodic auto-save has been removed per user instruction.
   // Changes are saved manually via the Save button or the exit confirmation modal.
@@ -448,7 +706,8 @@ export default function App() {
         const { payload, fileName } = await readFromProjectHandle(
           handle, 
           targetProjectId, 
-          `cat-${targetProjectId}-etc`
+          `cat-${targetProjectId}-etc`,
+          { allowPromptRequest: true }
         );
 
         if (payload.items) {
@@ -478,12 +737,14 @@ export default function App() {
               linkedJsonLastSync: nowStr,
               schemaType: payload.schemaType || p.schemaType,
               rawDocument: payload.rawDocument || p.rawDocument,
+              needsLinkPermission: false,
               isLinkError: false,
               linkErrorMessage: undefined
             };
           }
           return p;
         }));
+        setHasUnsavedChanges(false);
 
         setSyncNotice(`「${fileName}」を案件データベースとして再紐づけしました。`);
         setTimeout(() => setSyncNotice(''), 6000);
@@ -577,14 +838,38 @@ export default function App() {
     if (!activeProjectId) return;
     setIsSavingJson(true);
     try {
+      const handle = activeFileHandleRef.current || await getSavedFileHandleForProject(activeProjectId);
+      if (!handle) {
+        if (currentProject?.linkedJsonFileName) {
+          setIsSavingJson(false);
+          await handleRelinkProjectFile(activeProjectId);
+          return;
+        }
+        setHasUnsavedChanges(false);
+        setSyncNotice('ブラウザ内に変更を保存しました。（外部JSONファイルと連動するには「案件サマリー・JSON」から紐づけしてください）');
+        setTimeout(() => setSyncNotice(''), 5000);
+        return;
+      }
+      activeFileHandleRef.current = handle;
+
       const projectItems = items.filter(it => it.projectId === activeProjectId);
       const projectCats = categories.filter(c => c.projectId === activeProjectId);
-      await persistItemsToLinkedJson(activeProjectId, projectItems, projectCats);
-      setHasUnsavedChanges(false);
-      setSyncNotice('紐づけ先JSONファイルに正常に保存しました。');
-      setTimeout(() => setSyncNotice(''), 4000);
+      const saved = await persistItemsToLinkedJson(activeProjectId, projectItems, projectCats, {
+        allowPromptRequest: true,
+        throwOnError: true
+      });
+      if (saved) {
+        setHasUnsavedChanges(false);
+        setSyncNotice('紐づけ先JSONファイルに正常に保存しました。');
+        setTimeout(() => setSyncNotice(''), 4000);
+      }
     } catch (err: any) {
-      alert(`JSONファイルの保存に失敗しました: ${err.message || 'エラーが発生しました'}`);
+      if (err instanceof PermissionRequiredError) {
+        setSyncNotice('JSONファイルへの書き込み権限が許可されませんでした。再度保存ボタンを押して「編集を許可」してください。');
+        setTimeout(() => setSyncNotice(''), 6000);
+      } else {
+        alert(`JSONファイルの保存に失敗しました: ${err.message || 'エラーが発生しました'}`);
+      }
     } finally {
       setIsSavingJson(false);
     }
@@ -1043,6 +1328,7 @@ export default function App() {
         isSyncing={isSyncing}
         onManualSync={() => performSyncProject(activeProjectId, false)}
         onRelinkFile={() => handleRelinkProjectFile(activeProjectId)}
+        onReconnectFile={() => handleReconnectProjectFile(activeProjectId)}
         hasUnsavedChanges={hasUnsavedChanges}
         onManualSave={handleManualSaveJson}
         isSaving={isSavingJson}
@@ -1084,14 +1370,45 @@ export default function App() {
         </div>
       )}
 
-      {/* Prominent Global File Link Error Alert Banner */}
+      {/* Calm Permission Resume Banner (Link IS preserved in IndexedDB across reload / new window!) */}
+      {currentProject?.needsLinkPermission && !currentProject?.isLinkError && (
+        <div className="bg-sky-700 text-white text-xs py-2 px-4 shadow-sm flex items-center justify-between transition-all">
+          <div className="flex items-center gap-2 max-w-7xl mx-auto w-full">
+            <Link2 className="w-4 h-4 shrink-0 text-sky-200" />
+            <div className="flex-1 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <span className="font-medium">
+                <strong className="font-bold">【JSON紐づけ維持中】</strong>
+                「{currentProject.linkedJsonFileName}」との紐づけは保持されています。ブラウザの更新・新規ウィンドウ起動後は1クリックで読み書き連動を再開できます。
+              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => handleReconnectProjectFile(activeProjectId)}
+                  disabled={isSyncing}
+                  className="px-3 py-1 bg-white hover:bg-sky-50 text-sky-800 font-bold rounded shadow-xs text-xs whitespace-nowrap flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                  <span>ワンクリックで連動を再開（再選択不要）</span>
+                </button>
+                <button
+                  onClick={() => handleRelinkProjectFile(activeProjectId)}
+                  className="px-2.5 py-1 bg-sky-800 hover:bg-sky-900 text-sky-100 font-medium rounded text-xs whitespace-nowrap transition-colors cursor-pointer"
+                >
+                  別ファイルに変更
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Prominent Global File Link Error Alert Banner (only when genuinely missing or no handle stored) */}
       {currentProject?.isLinkError && (
         <div className="bg-red-600 text-white text-xs py-2.5 px-4 shadow-md flex items-center justify-between transition-all">
           <div className="flex items-center gap-2 max-w-7xl mx-auto w-full">
             <AlertTriangle className="w-4 h-4 shrink-0 animate-pulse text-amber-200" />
             <div className="flex-1 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
               <span className="font-semibold">
-                【ファイル消失・アクセスエラー】紐づけ元のJSONファイル「{currentProject.linkedJsonFileName}」が見つかりません。ファイルが移動または削除された可能性があります。
+                【ファイル参照エラー】{currentProject.linkErrorMessage || `紐づけ元のJSONファイル「${currentProject.linkedJsonFileName}」が見つかりません。ファイルが移動または削除された可能性があります。`}
               </span>
               <button
                 onClick={() => handleRelinkProjectFile(activeProjectId)}
@@ -1179,6 +1496,7 @@ export default function App() {
             onAddProjectWithFile={handleAddProjectWithFile}
             onUpdateProject={handleUpdateProject}
             onRelinkProjectFile={handleRelinkProjectFile}
+            onReconnectProjectFile={handleReconnectProjectFile}
             onSyncProjectFile={(pid) => performSyncProject(pid, false)}
             onExportProjectBackup={handleExportProjectBackup}
             onImportProjectBackup={handleImportProjectBackup}
