@@ -107,7 +107,7 @@ export default function App() {
       const saved = localStorage.getItem('specforge_templates_v2');
       if (saved) {
         const parsed: SpecTemplate[] = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           return parsed.map(normalizeSpecTemplate);
         }
       }

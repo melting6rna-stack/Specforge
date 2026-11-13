@@ -397,7 +397,8 @@ export function exportMappingAssetAsJson(template: SpecTemplate): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `MappingAsset_${template.code}_${new Date().toISOString().slice(0, 10)}.specmap.json`;
+  const safeName = (template.name || 'template').replace(/[\s/\\?%*:|"<>]/g, '_');
+  a.download = `MappingAsset_${safeName}_${new Date().toISOString().slice(0, 10)}.specmap.json`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -421,7 +422,7 @@ export function importMappingAssetFromJson(jsonString: string): SpecMappingAsset
     exportedAt: parsed.exportedAt || new Date().toISOString(),
     templateId: parsed.templateId || parsed.id || `tpl-${Date.now()}`,
     templateName: parsed.templateName || parsed.name || 'インポート仕様書',
-    templateCode: parsed.templateCode || parsed.code || 'SPEC-IMPORTED',
+    templateCode: parsed.templateCode || parsed.code || '',
     description: parsed.description || '',
     targetCategoryName: parsed.targetCategoryName,
     fields: parsed.fields || [],

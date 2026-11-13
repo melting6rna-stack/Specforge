@@ -20,7 +20,8 @@ import {
   Calendar,
   Layers,
   ArrowRight,
-  HardDrive
+  HardDrive,
+  AlertTriangle
 } from 'lucide-react';
 import { SpecTemplate, SpecFieldMapping, SpecMappingAssetFile, EquipmentItem, ProjectWorkspace } from '../types';
 import { exportMappingAssetAsJson, importMappingAssetFromJson, createDefaultMasterWorkbook } from '../utils/exceljsEngine';
@@ -51,6 +52,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [editingTemplate, setEditingTemplate] = useState<SpecTemplate | null>(null);
   const [activeTabSub, setActiveTabSub] = useState<'fields' | 'basic' | 'asset'>('fields');
+  const [deleteTargetTpl, setDeleteTargetTpl] = useState<SpecTemplate | null>(null);
   const [message, setMessage] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
 
@@ -125,7 +127,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
     const newId = `tpl-custom-${Date.now()}`;
     const newTemplate: SpecTemplate = normalizeSpecTemplate({
       id: newId,
-      code: `SPEC-CUSTOM-${Math.floor(100 + Math.random() * 900)}`,
+      code: '',
       name: '新規仕様書 テンプレート',
       description: 'セル番地マッピングおよびチェック項目を定義した新規仕様書',
       columns: ['機器名', '数量', '納期', '特記事項'],
@@ -153,13 +155,33 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
     const duplicated: SpecTemplate = {
       ...JSON.parse(JSON.stringify(tpl)),
       id: newId,
-      code: `${tpl.code}-COPY`,
+      code: '',
       name: `${tpl.name} (複製)`,
       updatedAt: new Date().toISOString().slice(0, 10)
     };
     onUpdateTemplates([duplicated, ...templates]);
     setSelectedTemplateId(newId);
     handleStartEdit(duplicated);
+  };
+
+  // 2nd cushion: confirm delete template
+  const handleConfirmDeleteTemplate = () => {
+    if (!deleteTargetTpl) return;
+    const deletedName = deleteTargetTpl.name;
+    const deletedId = deleteTargetTpl.id;
+    const nextTemplates = templates.filter(t => t.id !== deletedId);
+    onUpdateTemplates(nextTemplates);
+
+    if (selectedTemplateId === deletedId) {
+      setSelectedTemplateId(nextTemplates[0]?.id || '');
+    }
+    if (editingTemplate?.id === deletedId) {
+      setIsEditing(false);
+      setEditingTemplate(null);
+    }
+    setDeleteTargetTpl(null);
+    setMessage(`テンプレート「${deletedName}」を削除しました。`);
+    setTimeout(() => setMessage(''), 4000);
   };
 
   // Upload Master Excel Template (.xlsx)
@@ -234,7 +256,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
 
         const newTemplate: SpecTemplate = normalizeSpecTemplate({
           id: asset.templateId || `tpl-${Date.now()}`,
-          code: asset.templateCode || 'SPEC-IMPORTED',
+          code: '',
           name: asset.templateName || file.name.replace('.specmap.json', ''),
           description: asset.description || '外部からインポートされたマッピング定義仕様書',
           targetCategoryName: asset.targetCategoryName || '汎用',
@@ -349,25 +371,25 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
   };
 
   const rawActiveTpl = isEditing && editingTemplate ? editingTemplate : currentTemplate;
-  const activeTpl = React.useMemo(() => normalizeSpecTemplate(rawActiveTpl), [rawActiveTpl]);
+  const activeTpl = React.useMemo(() => (rawActiveTpl ? normalizeSpecTemplate(rawActiveTpl) : null), [rawActiveTpl]);
 
   const detailFields = React.useMemo(() => {
-    return (activeTpl.fields || []).filter(f => f.group === 'detail');
-  }, [activeTpl.fields]);
+    return (activeTpl?.fields || []).filter(f => f.group === 'detail');
+  }, [activeTpl]);
 
   const specFields = React.useMemo(() => {
-    return (activeTpl.fields || []).filter(
+    return (activeTpl?.fields || []).filter(
       f => f.type !== 'checkbox' && f.group !== 'basic' && f.group !== 'detail'
     );
-  }, [activeTpl.fields]);
+  }, [activeTpl]);
 
   const checkboxFields = React.useMemo(() => {
-    return (activeTpl.fields || []).filter(f => f.type === 'checkbox' || f.group === 'check');
-  }, [activeTpl.fields]);
+    return (activeTpl?.fields || []).filter(f => f.type === 'checkbox' || f.group === 'check');
+  }, [activeTpl]);
 
   const basicFields = React.useMemo(() => {
-    return (activeTpl.fields || []).filter(f => f.group === 'basic');
-  }, [activeTpl.fields]);
+    return (activeTpl?.fields || []).filter(f => f.group === 'basic');
+  }, [activeTpl]);
 
   return (
     <div className="space-y-4">
@@ -405,8 +427,9 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
 
           {/* Export Current Asset */}
           <button
-            onClick={() => handleExportAsset(currentTemplate)}
-            className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
+            onClick={() => currentTemplate && handleExportAsset(currentTemplate)}
+            disabled={!currentTemplate}
+            className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             title="現在のマッピング定義をJSONアセットとして書き出し"
           >
             <Download className="w-3.5 h-3.5 text-slate-600" />
@@ -449,59 +472,86 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
             </div>
 
             <div className="space-y-1.5">
-              {templates.map(tpl => {
-                const isSelected = tpl.id === selectedTemplateId;
-                return (
-                  <div
-                    key={tpl.id}
-                    onClick={() => {
-                      setSelectedTemplateId(tpl.id);
-                      setIsEditing(false);
-                      setEditingTemplate(null);
-                    }}
-                    className={`p-2.5 rounded-lg border text-xs transition-all cursor-pointer ${
-                      isSelected
-                        ? 'bg-indigo-50 border-indigo-400 text-indigo-950 shadow-2xs font-semibold'
-                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="truncate">{tpl.name}</span>
-                      <span className="text-[10px] font-mono text-slate-400">{tpl.code}</span>
+              {templates.length === 0 ? (
+                <div className="py-6 text-center text-[11px] text-slate-400">
+                  登録テンプレートがありません
+                </div>
+              ) : (
+                templates.map(tpl => {
+                  const isSelected = tpl.id === selectedTemplateId;
+                  return (
+                    <div
+                      key={tpl.id}
+                      onClick={() => {
+                        setSelectedTemplateId(tpl.id);
+                        setIsEditing(false);
+                        setEditingTemplate(null);
+                      }}
+                      className={`p-2.5 rounded-lg border text-xs transition-all cursor-pointer group ${
+                        isSelected
+                          ? 'bg-indigo-50 border-indigo-400 text-indigo-950 shadow-2xs font-semibold'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate">{tpl.name}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteTargetTpl(tpl);
+                          }}
+                          className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors shrink-0 cursor-pointer"
+                          title={`「${tpl.name}」を削除`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-normal mt-1 flex items-center gap-1.5">
+                        <span>項目: {tpl.fields?.length || 0}個</span>
+                        <span>•</span>
+                        <span>更新: {tpl.updatedAt}</span>
+                      </div>
                     </div>
-                    <div className="text-[10px] text-slate-500 font-normal mt-1 flex items-center gap-1.5">
-                      <span>項目: {tpl.fields?.length || 0}個</span>
-                      <span>•</span>
-                      <span>更新: {tpl.updatedAt}</span>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           </div>
         </div>
 
         {/* Right Column: Template Detail & Mapping Editor (9 cols) */}
         <div className="lg:col-span-9 space-y-4">
-          
+          {!activeTpl ? (
+            <div className="bg-white border border-dashed border-slate-300 rounded-xl p-10 text-center space-y-3">
+              <FileSpreadsheet className="w-8 h-8 text-slate-300 mx-auto" />
+              <div className="text-sm font-bold text-slate-700">テンプレートが登録されていません</div>
+              <p className="text-xs text-slate-500">
+                「新規テンプレート作成」または「マッピング定義 (JSON) を読込」からテンプレートを追加してください。
+              </p>
+              <button
+                onClick={handleCreateNewTemplate}
+                className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>新規テンプレート作成</span>
+              </button>
+            </div>
+          ) : (
+            <>
           {/* Header Card for Selected Template */}
           <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
               <div className="flex-1 min-w-0">
                 {isEditing ? (
                   <div className="space-y-1.5 max-w-xl">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={editingTemplate?.name ?? ''}
-                        onChange={(e) => setEditingTemplate(prev => prev ? { ...prev, name: e.target.value } : prev)}
-                        placeholder="仕様書のテンプレート名を入力..."
-                        className="flex-1 min-w-0 text-sm font-bold text-slate-900 bg-white border border-indigo-300 rounded-md px-2.5 py-1 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
-                      />
-                      <span className="text-xs font-mono bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200 shrink-0">
-                        {activeTpl.code}
-                      </span>
-                    </div>
+                    <input
+                      type="text"
+                      value={editingTemplate?.name ?? ''}
+                      onChange={(e) => setEditingTemplate(prev => prev ? { ...prev, name: e.target.value } : prev)}
+                      placeholder="仕様書のテンプレート名を入力..."
+                      className="w-full text-sm font-bold text-slate-900 bg-white border border-indigo-300 rounded-md px-2.5 py-1 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                    />
                     <p className="text-xs text-slate-500 truncate">
                       {activeTpl.description}
                     </p>
@@ -510,9 +560,6 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                   <>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-bold text-slate-900">{activeTpl.name}</span>
-                      <span className="text-xs font-mono bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
-                        {activeTpl.code}
-                      </span>
                     </div>
                     <p className="text-xs text-slate-500 mt-1">
                       {activeTpl.description}
@@ -540,6 +587,14 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                   </>
                 ) : (
                   <>
+                    <button
+                      onClick={() => setDeleteTargetTpl(activeTpl)}
+                      className="px-3 py-1.5 text-xs font-medium text-red-600 bg-white hover:bg-red-50 border border-red-200 rounded-md transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                      title="このテンプレートを削除"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>削除</span>
+                    </button>
                     <button
                       onClick={() => handleDuplicateTemplate(activeTpl)}
                       className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
@@ -1118,7 +1173,6 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                   schemaType: 'specforge-mapping-asset',
                   templateId: activeTpl.id,
                   templateName: activeTpl.name,
-                  templateCode: activeTpl.code,
                   fields: activeTpl.fields || [],
                   masterFileName: activeTpl.masterFileName || activeTpl.originalFileName
                 }, null, 2)}</pre>
@@ -1126,9 +1180,48 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
             </div>
           )}
 
+            </>
+          )}
         </div>
 
       </div>
+
+      {/* 2-Step Confirmation Modal for Deleting Template */}
+      {deleteTargetTpl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-5 py-3.5 bg-red-600 text-white flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <h3 className="font-bold text-sm">登録テンプレートの削除確認</h3>
+            </div>
+            <div className="p-5 space-y-3 text-xs text-slate-700">
+              <p className="font-semibold text-slate-900 text-sm">
+                「{deleteTargetTpl.name}」を削除しますか？
+              </p>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                この操作を実行すると、該当テンプレートのマッピング設定および登録された雛形Excelデータは一覧から削除され、元に戻せません。
+              </p>
+            </div>
+            <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteTargetTpl(null)}
+                className="px-3.5 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-md transition-colors cursor-pointer"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteTemplate}
+                className="px-4 py-1.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-md shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>削除を実行</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

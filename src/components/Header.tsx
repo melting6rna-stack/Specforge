@@ -58,9 +58,11 @@ export const Header: React.FC<HeaderProps> = ({
           
           {/* Zone 1: Brand & Current Workspace */}
           <div className="flex items-center gap-3 shrink-0">
-            <div className="w-8 h-8 rounded-lg bg-slate-900 flex items-center justify-center text-white shadow-2xs">
-              <FileText className="w-4 h-4 text-indigo-400" />
-            </div>
+            <img
+              src="/assets/aistudio/_____20261113_76ad5948.png"
+              alt="SpecForge"
+              className="w-8 h-8 rounded-lg object-cover shadow-2xs shrink-0"
+            />
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-bold text-sm tracking-tight text-slate-900">SpecForge</span>

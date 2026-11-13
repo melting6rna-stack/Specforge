@@ -74,7 +74,7 @@ export async function parseExcelTemplateFile(
 
   const template: SpecTemplate = {
     id: `tpl-excel-${Date.now()}`,
-    code: `TPL-EXCEL-${Math.floor(100 + Math.random() * 900)}`,
+    code: '',
     name: baseName || '取込Excel仕様書テンプレート',
     description: `アップロードされたExcelファイル(${file.name})の原本書式を保持したセル指定テンプレート`,
     columns: detectedCols,

@@ -626,11 +626,15 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
               }}
               className="w-full text-xs font-semibold text-slate-800 bg-slate-50 border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden cursor-pointer"
             >
-              {templates.map(t => (
-                <option key={t.id} value={t.id}>
-                  {t.name} ({t.code})
-                </option>
-              ))}
+              {templates.length === 0 ? (
+                <option value="">テンプレート未登録（「マッピング設定管理」から作成）</option>
+              ) : (
+                templates.map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))
+              )}
             </select>
           </div>
 
