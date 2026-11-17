@@ -109,6 +109,12 @@
           "type": "string",
           "pattern": "^EQ-[0-9]{3,}$"
         },
+        "equipment_type": {
+          "type": "string",
+          "pattern": "^[A-Z]{2}$",
+          "default": "PA",
+          "description": "機器種別 (アルファベット2文字, 例: PA, VA, PU, TK)"
+        },
         "name": {
           "type": "string",
           "minLength": 1

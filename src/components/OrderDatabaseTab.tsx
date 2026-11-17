@@ -702,7 +702,7 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    setBatchEquipmentTypeValue('');
+                    setBatchEquipmentTypeValue('PA');
                     setIsBatchEquipmentTypeModalOpen(true);
                   }}
                   className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
@@ -921,7 +921,7 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
 
                           {/* 機器種別 (囲みなしプレーン文字列) */}
                           <td className="py-3 px-3 min-w-[80px] font-mono font-bold text-slate-700 whitespace-nowrap text-center">
-                            {item.equipmentType ? item.equipmentType.toUpperCase() : '-'}
+                            {item.equipmentType ? item.equipmentType.toUpperCase() : 'PA'}
                           </td>
 
                           {/* 機器番号 (購入品・製作品マークなしプレーン表示) */}
@@ -1296,13 +1296,14 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
               <div>
                 <label className="block font-semibold text-slate-700 mb-1 flex items-center justify-between">
                   <span>新しい機器種別 (2文字)</span>
-                  <span className="text-[10px] text-slate-400 font-mono">半角英字2文字 (例: VA, PU, TK, HE)</span>
+                  <span className="text-[10px] text-slate-400 font-mono">半角英大文字2文字 (例: PA, VA, PU, TK)</span>
                 </label>
                 <input
                   type="text"
                   maxLength={2}
+                  pattern="^[A-Z]{2}$"
                   required
-                  placeholder="VA"
+                  placeholder="PA"
                   value={batchEquipmentTypeValue}
                   onChange={(e) => setBatchEquipmentTypeValue(e.target.value.toUpperCase().replace(/[^A-Z]/g, ''))}
                   className="w-full border border-slate-300 rounded-lg p-2.5 font-mono font-bold uppercase text-sm text-indigo-900 tracking-wider focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
@@ -1350,7 +1351,7 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={!batchEquipmentTypeValue.trim()}
+                  disabled={!/^[A-Z]{2}$/.test(batchEquipmentTypeValue.trim().toUpperCase())}
                   className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <Check className="w-3.5 h-3.5" />

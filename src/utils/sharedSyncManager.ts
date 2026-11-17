@@ -340,6 +340,19 @@ export function normalizeJsonToDatabase(
 }
 
 /**
+ * Normalizes equipment_type (機器種別) to a 2-letter uppercase ASCII code, defaulting to 'PA'.
+ */
+export function normalizeEquipmentType(rawVal: any, fallback: string = 'PA'): string {
+  if (typeof rawVal === 'string') {
+    const cleaned = rawVal.trim().toUpperCase().replace(/[^A-Z]/g, '');
+    if (/^[A-Z]{2}$/.test(cleaned)) {
+      return cleaned;
+    }
+  }
+  return fallback;
+}
+
+/**
  * Normalizes an item from the Tokki Equipment schema format
  * Automatically recognizes coating specifications and project-specific categories
  */
@@ -353,6 +366,7 @@ function normalizeTokkiEquipmentItem(
   const tagNo = eq.id || eq.tagNo || formatTagNo('03', index + 1);
   const parsedCls = parseTagNo(tagNo);
   const itemClassification = parsedCls.classification;
+  const equipmentType = normalizeEquipmentType(eq.equipment_type ?? eq.equipmentType ?? eq['機器種別'], 'PA');
   const name = eq.name || `機器-${index + 1}`;
   
   // Quantity
@@ -419,6 +433,7 @@ function normalizeTokkiEquipmentItem(
     projectId,
     tagNo,
     classification: itemClassification,
+    equipmentType,
     name,
     quantity,
     unit,
@@ -596,7 +611,7 @@ function normalizeSingleItem(
     projectId,
     tagNo: String(tagNo),
     classification: raw.classification || parsedGenericCls.classification,
-    equipmentType: raw.equipmentType || raw['機器種別'] || undefined,
+    equipmentType: normalizeEquipmentType(raw.equipment_type ?? raw.equipmentType ?? raw['機器種別'], 'PA'),
     name: String(name),
     quantity,
     unit: String(unit),
@@ -849,8 +864,14 @@ export async function writeToProjectHandle(
           });
         }
 
+        const equipmentType = normalizeEquipmentType(
+          item.equipmentType ?? item.rawTokki?.equipment_type ?? item.rawTokki?.equipmentType,
+          'PA'
+        );
+
         const eqObj: any = {
           id: eqId,
+          equipment_type: equipmentType,
           name: item.name,
           category: catName,
           action: item.action || 'その他',
@@ -904,7 +925,14 @@ export async function writeToProjectHandle(
         projects: payload.projects,
         categories: payload.categories,
         templates: payload.templates,
-        items: payload.items
+        items: payload.items.map(it => {
+          const equipmentType = normalizeEquipmentType(it.equipmentType, 'PA');
+          return {
+            ...it,
+            equipmentType,
+            equipment_type: equipmentType
+          };
+        })
       };
     }
 

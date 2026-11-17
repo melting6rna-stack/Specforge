@@ -141,7 +141,7 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
   // Auto-calculated document number: 客先コードの後にハイフン入れず機器種別の2文字+G、ハイフン+機器番号
   const fixedDocNo = useMemo(() => {
     const clientCode = currentProject?.code || currentProject?.orderNo || 'PRJ-2026-01';
-    const typeCode = (primaryItem?.equipmentType || 'VA').trim().toUpperCase();
+    const typeCode = (primaryItem?.equipmentType || 'PA').trim().toUpperCase();
     const tag = primaryItem?.tagNo || 'V-101';
     return `${clientCode}${typeCode}G-${tag}`;
   }, [currentProject?.code, currentProject?.orderNo, primaryItem?.equipmentType, primaryItem?.tagNo]);
@@ -182,7 +182,7 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
       }
       if (f.id === 'f-docno' || labelClean.includes('仕様書番号')) {
         const clientCode = currentProject?.code || currentProject?.orderNo || 'PRJ-2026-01';
-        const typeCode = (item.equipmentType || 'VA').trim().toUpperCase();
+        const typeCode = (item.equipmentType || 'PA').trim().toUpperCase();
         newVals[f.id] = `${clientCode}${typeCode}G-${item.tagNo || 'V-101'}`;
         matched[f.id] = `客先コード・機器種別連動: ${newVals[f.id]}`;
         continue;

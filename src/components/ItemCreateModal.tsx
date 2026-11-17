@@ -71,7 +71,7 @@ export const ItemCreateModal: React.FC<ItemCreateModalProps> = ({
   const computedTagNo = formatTagNo(classification, seq);
 
   // Basic Information
-  const [equipmentType, setEquipmentType] = useState('VA');
+  const [equipmentType, setEquipmentType] = useState('PA');
   const [name, setName] = useState('');
   const [categoryId, setCategoryId] = useState(categories[0]?.id || 'cat-etc');
   const [quantity, setQuantity] = useState<number>(1);
@@ -170,6 +170,12 @@ export const ItemCreateModal: React.FC<ItemCreateModalProps> = ({
       return;
     }
 
+    const normalizedEqType = equipmentType.trim().toUpperCase() || 'PA';
+    if (!/^[A-Z]{2}$/.test(normalizedEqType)) {
+      setErrorMessage('機器種別は半角英大文字2文字（例: PA, VA, PU）で入力してください。');
+      return;
+    }
+
     const nowStr = new Date().toISOString().slice(0, 10);
 
     // Filter out completely empty spec rows
@@ -214,7 +220,7 @@ export const ItemCreateModal: React.FC<ItemCreateModalProps> = ({
       projectId,
       tagNo: computedTagNo,
       classification,
-      equipmentType: equipmentType.trim().toUpperCase(),
+      equipmentType: normalizedEqType,
       name: name.trim(),
       quantity: Number(quantity) || 1,
       unit: unit.trim() || '台',
@@ -331,12 +337,13 @@ export const ItemCreateModal: React.FC<ItemCreateModalProps> = ({
               <div>
                 <label className="block font-semibold text-slate-700 mb-1 flex items-center justify-between">
                   <span>機器種別 (2文字)</span>
-                  <span className="text-[10px] text-slate-400">例: VA, PU</span>
+                  <span className="text-[10px] text-slate-400">例: PA, VA, PU</span>
                 </label>
                 <input
                   type="text"
                   maxLength={2}
-                  placeholder="VA"
+                  pattern="^[A-Z]{2}$"
+                  placeholder="PA"
                   value={equipmentType}
                   onChange={(e) => setEquipmentType(e.target.value.toUpperCase().replace(/[^A-Z]/g, ''))}
                   className="w-full border border-slate-300 rounded-md px-3 py-2 font-mono font-bold uppercase text-xs focus:ring-1 focus:ring-slate-900 focus:outline-hidden"

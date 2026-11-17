@@ -75,7 +75,10 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
 
   const computedTagNo = formatTagNo(classification, seq);
 
-  const [equipmentType, setEquipmentType] = useState(item.equipmentType || '');
+  const [equipmentType, setEquipmentType] = useState(() => {
+    const cleaned = (item.equipmentType || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
+    return /^[A-Z]{2}$/.test(cleaned) ? cleaned : 'PA';
+  });
   const [name, setName] = useState(item.name || '');
   const [categoryId, setCategoryId] = useState(item.categoryId || categories[0]?.id || 'cat-etc');
   const [quantity, setQuantity] = useState<number>(item.quantity || 1);
@@ -211,6 +214,12 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
       return;
     }
 
+    const normalizedEqType = equipmentType.trim().toUpperCase() || 'PA';
+    if (!/^[A-Z]{2}$/.test(normalizedEqType)) {
+      setErrorMessage('機器種別は半角英大文字2文字（例: PA, VA, PU）で入力してください。');
+      return;
+    }
+
     const nowStr = new Date().toISOString().slice(0, 10);
     const validSpecs = specs.filter(s => s.name.trim() || s.value.trim());
 
@@ -253,7 +262,9 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
     if (computedTagNo !== (item.tagNo || '')) {
       diffList.push(`機器番号: ${item.tagNo || '-'} → ${computedTagNo} (${getClassificationLabel(classification)} No.${seq})`);
     }
-    if (equipmentType.trim().toUpperCase() !== (item.equipmentType || '')) diffList.push(`機器種別: ${item.equipmentType || '-'} → ${equipmentType.trim().toUpperCase()}`);
+    if (normalizedEqType !== (item.equipmentType || 'PA')) {
+      diffList.push(`機器種別: ${item.equipmentType || '未設定'} → ${normalizedEqType}`);
+    }
     if (name.trim() !== item.name) diffList.push(`機器名: ${item.name} → ${name.trim()}`);
     if (Number(quantity) !== item.quantity || unit.trim() !== item.unit) diffList.push(`数量: ${item.quantity}${item.unit} → ${quantity}${unit}`);
     if (categoryId !== item.categoryId) {
@@ -305,7 +316,8 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
       id: computedTagNo,
       tagNo: computedTagNo,
       classification,
-      equipmentType: equipmentType.trim().toUpperCase() || undefined,
+      equipmentType: normalizedEqType,
+      ...(item.rawTokki ? { rawTokki: { ...item.rawTokki, equipment_type: normalizedEqType } } : {}),
       name: name.trim(),
       quantity: Number(quantity) || 1,
       unit: unit.trim() || '台',
@@ -404,12 +416,13 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
             <div>
               <label className="block font-semibold text-slate-700 mb-1 flex items-center justify-between">
                 <span>機器種別 (2文字)</span>
-                <span className="text-[10px] text-slate-400">例: VA, PU</span>
+                <span className="text-[10px] text-slate-400">例: PA, VA, PU</span>
               </label>
               <input
                 type="text"
                 maxLength={2}
-                placeholder="VA"
+                pattern="^[A-Z]{2}$"
+                placeholder="PA"
                 value={equipmentType}
                 onChange={(e) => setEquipmentType(e.target.value.toUpperCase().replace(/[^A-Z]/g, ''))}
                 className="w-full border border-slate-300 rounded px-3 py-2 font-mono font-bold uppercase text-xs focus:ring-1 focus:ring-slate-900 focus:outline-hidden"

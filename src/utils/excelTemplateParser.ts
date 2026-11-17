@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { SpecTemplate, EquipmentItem, EquipmentSpecParam } from '../types';
+import { normalizeEquipmentType } from './sharedSyncManager';
 
 export interface ParsedTemplateResult {
   template: SpecTemplate;
@@ -262,11 +263,15 @@ export async function parseEquipmentExcel(
       });
     }
 
+    const rawEqType = rowObj['機器種別'] || rowObj['種別'] || rowObj['equipment_type'] || rowObj['equipmentType'] || '';
+    const equipmentType = normalizeEquipmentType(rawEqType, 'PA');
+
     items.push({
       id: `eq-imp-${Date.now()}-${i}`,
       projectId,
       tagNo,
       classification: tagNo.startsWith('08-') ? '08' : (tagNo.startsWith('04-') ? '04' : '03'),
+      equipmentType,
       name,
       quantity,
       unit,

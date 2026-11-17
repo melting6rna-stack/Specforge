@@ -135,6 +135,12 @@
           "pattern": "^[0-9]{2}-[0-9]{3,}$",
           "description": "機器タグ番号 (例: 03-001, 04-012, 08-001)"
         },
+        "equipment_type": {
+          "type": "string",
+          "pattern": "^[A-Z]{2}$",
+          "default": "PA",
+          "description": "機器種別 (アルファベット2文字, 例: PA, VA, PU, TK)"
+        },
         "name": {
           "type": "string",
           "minLength": 1,

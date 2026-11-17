@@ -25,12 +25,24 @@ import {
   getSavedFileHandleForProject,
   removeSavedFileHandleForProject,
   readFromProjectHandle,
-  writeToProjectHandle
+  writeToProjectHandle,
+  normalizeEquipmentType
 } from './utils/sharedSyncManager';
 import { Bell, AlertTriangle, RefreshCw, HardDrive, Save, Link2 } from 'lucide-react';
 
 function sanitizeProjectsForStorage(list: ProjectWorkspace[]): ProjectWorkspace[] {
   return list.map(({ isLinkError, linkErrorMessage, needsLinkPermission, ...rest }) => rest);
+}
+
+function ensureItemEquipmentTypes(list: EquipmentItem[]): EquipmentItem[] {
+  return list.map(it => {
+    const eqType = normalizeEquipmentType(it.equipmentType ?? it.rawTokki?.equipment_type ?? it.rawTokki?.equipmentType, 'PA');
+    return {
+      ...it,
+      equipmentType: eqType,
+      ...(it.rawTokki ? { rawTokki: { ...it.rawTokki, equipment_type: eqType } } : {})
+    };
+  });
 }
 
 export default function App() {
@@ -94,11 +106,11 @@ export default function App() {
   const [items, setItems] = useState<EquipmentItem[]>(() => {
     try {
       const saved = localStorage.getItem('specforge_items_v2');
-      if (saved) return JSON.parse(saved);
+      if (saved) return ensureItemEquipmentTypes(JSON.parse(saved));
     } catch (e) {
       console.warn('Failed to parse saved items', e);
     }
-    return INITIAL_ITEMS;
+    return ensureItemEquipmentTypes(INITIAL_ITEMS);
   });
 
   // 4. Templates state (normalized to individual 4-slot cell mappings)
@@ -238,7 +250,7 @@ export default function App() {
             } : inc;
           }));
         } else if (e.key === 'specforge_items_v2') {
-          setItems(JSON.parse(e.newValue));
+          setItems(ensureItemEquipmentTypes(JSON.parse(e.newValue)));
         } else if (e.key === 'specforge_categories_v3') {
           setCategories(JSON.parse(e.newValue));
         } else if (e.key === 'specforge_templates_v2') {
@@ -1042,12 +1054,12 @@ export default function App() {
   const handleBatchUpdateEquipmentType = (itemIds: string[], newEquipmentType: string) => {
     if (!itemIds.length) return;
     const nowStr = new Date().toLocaleString('ja-JP', { hour12: false });
-    const formattedType = newEquipmentType.trim().toUpperCase();
+    const formattedType = normalizeEquipmentType(newEquipmentType, 'PA');
 
     setItems(prev => {
       const nextList = prev.map(it => {
         if (itemIds.includes(it.id)) {
-          const oldType = it.equipmentType || '-';
+          const oldType = it.equipmentType || 'PA';
           const typeLog: ChangeLog = {
             id: `hist-type-${Date.now()}-${it.id.slice(-4)}`,
             itemId: it.id,
@@ -1062,6 +1074,7 @@ export default function App() {
           return {
             ...it,
             equipmentType: formattedType,
+            ...(it.rawTokki ? { rawTokki: { ...it.rawTokki, equipment_type: formattedType } } : {}),
             history: [typeLog, ...(it.history || [])],
             updatedAt: nowStr.slice(0, 10)
           };
@@ -1215,9 +1228,16 @@ export default function App() {
       const cls = targetClassification || updatedItem.classification || '03';
       const seq = targetSeq || 1;
 
+      const eqType = normalizeEquipmentType(updatedItem.equipmentType, 'PA');
+      const normalizedUpdatedItem: EquipmentItem = {
+        ...updatedItem,
+        equipmentType: eqType,
+        ...(updatedItem.rawTokki ? { rawTokki: { ...updatedItem.rawTokki, equipment_type: eqType } } : {})
+      };
+
       const resequencedProject = placeItemWithResequence(
         currentProjectItems,
-        updatedItem,
+        normalizedUpdatedItem,
         cls,
         seq,
         originalId
@@ -1310,7 +1330,7 @@ export default function App() {
           if (parsed.projects) setProjects(parsed.projects);
           if (parsed.categories) setCategories(parsed.categories);
           if (parsed.templates) setTemplates(parsed.templates);
-          setItems(parsed.items);
+          setItems(ensureItemEquipmentTypes(parsed.items));
           alert('プロジェクトデータベースを正常に復元しました。');
         } else {
           alert('ファイルの形式が正しくありません。');
