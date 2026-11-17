@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Database, 
   Search, 
@@ -96,6 +96,16 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
   // Row Drag-and-Drop Reordering state
   const [dragOverRowId, setDragOverRowId] = useState<string | null>(null);
   const [dropPosition, setDropPosition] = useState<'before' | 'after'>('after');
+
+  // Reset checkbox selection & batch modals when switching projects
+  useEffect(() => {
+    setSelectedItemIds([]);
+    setIsBatchDeliveryModalOpen(false);
+    setIsBatchEquipmentTypeModalOpen(false);
+    setIsBatchCategoryMenuOpen(false);
+    setSelectedCategoryId('all');
+    setClassificationFilter('all');
+  }, [activeProjectId]);
 
   // Filter items for current project
   const projectItems = items.filter(it => it.projectId === activeProjectId);
@@ -210,10 +220,10 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
   const handleOpenDeliveryEditor = (targetItemId?: string) => {
     if (targetItemId && !selectedItemIds.includes(targetItemId)) {
       setSelectedItemIds([targetItemId]);
-      const targetItem = items.find(it => it.id === targetItemId);
+      const targetItem = projectItems.find(it => it.id === targetItemId);
       setBatchDeliveryValue(targetItem?.deliveryDate || '');
     } else if (selectedItemIds.length > 0) {
-      const firstSelected = items.find(it => selectedItemIds.includes(it.id));
+      const firstSelected = projectItems.find(it => selectedItemIds.includes(it.id));
       setBatchDeliveryValue(firstSelected?.deliveryDate || '');
     }
     setIsBatchDeliveryModalOpen(true);
@@ -1216,7 +1226,7 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                   <span className="text-[10px] text-slate-400">変更前 → 変更後</span>
                 </div>
                 <div className="max-h-36 overflow-y-auto border border-slate-200 rounded-lg p-2 bg-slate-50/50 space-y-1 divide-y divide-slate-100">
-                  {items
+                  {projectItems
                     .filter(it => selectedItemIds.includes(it.id))
                     .map(it => (
                       <div key={it.id} className="pt-1 first:pt-0 flex items-center justify-between text-xs">
@@ -1318,7 +1328,7 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                   <span className="text-[10px] text-slate-400">変更前 → 変更後</span>
                 </div>
                 <div className="max-h-36 overflow-y-auto border border-slate-200 rounded-lg p-2 bg-slate-50/50 space-y-1 divide-y divide-slate-100">
-                  {items
+                  {projectItems
                     .filter(it => selectedItemIds.includes(it.id))
                     .map(it => (
                       <div key={it.id} className="pt-1 first:pt-0 flex items-center justify-between text-xs">

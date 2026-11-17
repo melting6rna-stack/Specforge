@@ -976,7 +976,7 @@ export default function App() {
   const handleMoveItemToCategory = (itemId: string, targetCategoryId: string) => {
     setItems(prev => {
       const nextList = prev.map(it => {
-        if (it.id === itemId) {
+        if (it.projectId === activeProjectId && it.id === itemId) {
           const oldCatName = projectCategories.find(c => c.id === it.categoryId)?.name || '未分類';
           const newCatName = projectCategories.find(c => c.id === targetCategoryId)?.name || '未分類';
           const nowStr = new Date().toLocaleString('ja-JP', { hour12: false });
@@ -1017,7 +1017,7 @@ export default function App() {
     
     setItems(prev => {
       const nextList = prev.map(it => {
-        if (itemIds.includes(it.id)) {
+        if (it.projectId === activeProjectId && itemIds.includes(it.id)) {
           const oldDate = it.deliveryDate || '-';
           const dateLog: ChangeLog = {
             id: `hist-deliv-${Date.now()}-${it.id.slice(-4)}`,
@@ -1058,7 +1058,7 @@ export default function App() {
 
     setItems(prev => {
       const nextList = prev.map(it => {
-        if (itemIds.includes(it.id)) {
+        if (it.projectId === activeProjectId && itemIds.includes(it.id)) {
           const oldType = it.equipmentType || 'PA';
           const typeLog: ChangeLog = {
             id: `hist-type-${Date.now()}-${it.id.slice(-4)}`,
@@ -1101,7 +1101,7 @@ export default function App() {
 
     setItems(prev => {
       const nextList = prev.map(it => {
-        if (itemIds.includes(it.id)) {
+        if (it.projectId === activeProjectId && itemIds.includes(it.id)) {
           const oldCatName = projectCategories.find(c => c.id === it.categoryId)?.name || '未分類';
           const catLog: ChangeLog = {
             id: `hist-cat-${Date.now()}-${it.id.slice(-4)}`,
@@ -1142,7 +1142,7 @@ export default function App() {
 
     setItems(prev => {
       const nextList = prev.map(it => {
-        if (itemIds.includes(it.id)) {
+        if (it.projectId === activeProjectId && itemIds.includes(it.id)) {
           const oldStatus = it.isIssued ? '済' : '未';
           const issueLog: ChangeLog = {
             id: `hist-issue-${Date.now()}-${it.id.slice(-4)}`,
@@ -1251,7 +1251,7 @@ export default function App() {
   };
 
   const handleDeleteItem = (itemId: string, skipConfirm: boolean = false) => {
-    const targetItem = items.find(it => it.id === itemId);
+    const targetItem = items.find(it => it.projectId === activeProjectId && it.id === itemId);
     const itemName = targetItem ? `${targetItem.name} (${targetItem.tagNo || '-'})` : 'この機器';
     if (skipConfirm || window.confirm(`機器「${itemName}」を削除してもよろしいですか？`)) {
       setItems(prev => {
@@ -1263,7 +1263,7 @@ export default function App() {
         return nextList;
       });
       setHasUnsavedChanges(true);
-      if (editingItem && editingItem.id === itemId) {
+      if (editingItem && editingItem.id === itemId && editingItem.projectId === activeProjectId) {
         setIsEditModalOpen(false);
         setEditingItem(null);
       }
