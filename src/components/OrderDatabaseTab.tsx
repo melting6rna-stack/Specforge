@@ -36,6 +36,7 @@ interface OrderDatabaseTabProps {
   activeProjectId: string;
   onEditItem: (item: EquipmentItem) => void;
   onDeleteItem: (itemId: string, skipConfirm?: boolean) => void;
+  onBatchDeleteItems?: (itemIds: string[]) => void;
   onAddNewItem: () => void;
   onOpenChangeLog: () => void;
   onAddCategory: (name: string) => void;
@@ -57,6 +58,7 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
   activeProjectId,
   onEditItem,
   onDeleteItem,
+  onBatchDeleteItems,
   onAddNewItem,
   onOpenChangeLog,
   onAddCategory,
@@ -774,7 +776,11 @@ export const OrderDatabaseTab: React.FC<OrderDatabaseTabProps> = ({
                   type="button"
                   onClick={() => {
                     if (window.confirm(`選択中の ${selectedItemIds.length} 件の機器を削除しますか？`)) {
-                      selectedItemIds.forEach(id => onDeleteItem(id, true));
+                      if (onBatchDeleteItems) {
+                        onBatchDeleteItems(selectedItemIds);
+                      } else {
+                        selectedItemIds.forEach(id => onDeleteItem(id, true));
+                      }
                       setSelectedItemIds([]);
                     }
                   }}

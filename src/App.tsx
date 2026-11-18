@@ -272,6 +272,7 @@ export default function App() {
     let isCancelled = false;
 
     async function loadProjectHandle() {
+      activeFileHandleRef.current = null;
       if (!activeProjectId) return;
       const handle = await getSavedFileHandleForProject(activeProjectId);
       if (isCancelled) return;
@@ -1010,14 +1011,17 @@ export default function App() {
     setHasUnsavedChanges(true);
   };
 
-  // Batch update delivery dates across multiple items
+  // Batch update delivery dates across multiple items (strictly scoped to activeProjectId)
   const handleBatchUpdateDeliveryDate = (itemIds: string[], newDeliveryDate: string) => {
     if (!itemIds.length) return;
+    const targetProjectId = activeProjectId;
     const nowStr = new Date().toLocaleString('ja-JP', { hour12: false });
-    
+    const targetCount = items.filter(it => it.projectId === targetProjectId && itemIds.includes(it.id)).length;
+    if (targetCount === 0) return;
+
     setItems(prev => {
       const nextList = prev.map(it => {
-        if (it.projectId === activeProjectId && itemIds.includes(it.id)) {
+        if (it.projectId === targetProjectId && itemIds.includes(it.id)) {
           const oldDate = it.deliveryDate || '-';
           const dateLog: ChangeLog = {
             id: `hist-deliv-${Date.now()}-${it.id.slice(-4)}`,
@@ -1028,7 +1032,7 @@ export default function App() {
             fieldLabel: '納入時期',
             oldValue: oldDate,
             newValue: newDeliveryDate,
-            reason: `納入時期の一括更新 (${itemIds.length}件)`
+            reason: `納入時期の一括更新 (${targetCount}件)`
           };
           return {
             ...it,
@@ -1040,25 +1044,28 @@ export default function App() {
         return it;
       });
 
-      const projectItems = nextList.filter(it => it.projectId === activeProjectId);
-      persistItemsToLinkedJson(activeProjectId, projectItems);
+      const projectItems = nextList.filter(it => it.projectId === targetProjectId);
+      persistItemsToLinkedJson(targetProjectId, projectItems);
       return nextList;
     });
 
     setHasUnsavedChanges(true);
-    setSyncNotice(`${itemIds.length}件の納入時期を「${newDeliveryDate}」へ一括変更しました。`);
+    setSyncNotice(`${targetCount}件の納入時期を「${newDeliveryDate}」へ一括変更しました。`);
     setTimeout(() => setSyncNotice(''), 5000);
   };
 
-  // Batch update equipment types across multiple items
+  // Batch update equipment types across multiple items (strictly scoped to activeProjectId)
   const handleBatchUpdateEquipmentType = (itemIds: string[], newEquipmentType: string) => {
     if (!itemIds.length) return;
+    const targetProjectId = activeProjectId;
     const nowStr = new Date().toLocaleString('ja-JP', { hour12: false });
     const formattedType = normalizeEquipmentType(newEquipmentType, 'PA');
+    const targetCount = items.filter(it => it.projectId === targetProjectId && itemIds.includes(it.id)).length;
+    if (targetCount === 0) return;
 
     setItems(prev => {
       const nextList = prev.map(it => {
-        if (it.projectId === activeProjectId && itemIds.includes(it.id)) {
+        if (it.projectId === targetProjectId && itemIds.includes(it.id)) {
           const oldType = it.equipmentType || 'PA';
           const typeLog: ChangeLog = {
             id: `hist-type-${Date.now()}-${it.id.slice(-4)}`,
@@ -1069,7 +1076,7 @@ export default function App() {
             fieldLabel: '機器種別',
             oldValue: oldType,
             newValue: formattedType,
-            reason: `機器種別の一括更新 (${itemIds.length}件)`
+            reason: `機器種別の一括更新 (${targetCount}件)`
           };
           return {
             ...it,
@@ -1082,26 +1089,29 @@ export default function App() {
         return it;
       });
 
-      const projectItems = nextList.filter(it => it.projectId === activeProjectId);
-      persistItemsToLinkedJson(activeProjectId, projectItems);
+      const projectItems = nextList.filter(it => it.projectId === targetProjectId);
+      persistItemsToLinkedJson(targetProjectId, projectItems);
       return nextList;
     });
 
     setHasUnsavedChanges(true);
-    setSyncNotice(`${itemIds.length}件の機器種別を「${formattedType}」へ一括変更しました。`);
+    setSyncNotice(`${targetCount}件の機器種別を「${formattedType}」へ一括変更しました。`);
     setTimeout(() => setSyncNotice(''), 5000);
   };
 
-  // Batch move multiple items to target category
+  // Batch move multiple items to target category (strictly scoped to activeProjectId)
   const handleBatchMoveToCategory = (itemIds: string[], targetCategoryId: string) => {
     if (!itemIds.length) return;
+    const targetProjectId = activeProjectId;
     const targetCat = projectCategories.find(c => c.id === targetCategoryId);
     const targetCatName = targetCat?.name || '未分類';
     const nowStr = new Date().toLocaleString('ja-JP', { hour12: false });
+    const targetCount = items.filter(it => it.projectId === targetProjectId && itemIds.includes(it.id)).length;
+    if (targetCount === 0) return;
 
     setItems(prev => {
       const nextList = prev.map(it => {
-        if (it.projectId === activeProjectId && itemIds.includes(it.id)) {
+        if (it.projectId === targetProjectId && itemIds.includes(it.id)) {
           const oldCatName = projectCategories.find(c => c.id === it.categoryId)?.name || '未分類';
           const catLog: ChangeLog = {
             id: `hist-cat-${Date.now()}-${it.id.slice(-4)}`,
@@ -1112,7 +1122,7 @@ export default function App() {
             fieldLabel: '所属カテゴリ',
             oldValue: oldCatName,
             newValue: targetCatName,
-            reason: `一括カテゴリ分類変更 (${itemIds.length}件)`
+            reason: `一括カテゴリ分類変更 (${targetCount}件)`
           };
           return {
             ...it,
@@ -1124,25 +1134,28 @@ export default function App() {
         return it;
       });
 
-      const projectItems = nextList.filter(it => it.projectId === activeProjectId);
-      persistItemsToLinkedJson(activeProjectId, projectItems);
+      const projectItems = nextList.filter(it => it.projectId === targetProjectId);
+      persistItemsToLinkedJson(targetProjectId, projectItems);
       return nextList;
     });
 
     setHasUnsavedChanges(true);
-    setSyncNotice(`${itemIds.length}件の機器を「${targetCatName}」へ一括移動しました。`);
+    setSyncNotice(`${targetCount}件の機器を「${targetCatName}」へ一括移動しました。`);
     setTimeout(() => setSyncNotice(''), 5000);
   };
 
-  // Batch update issue status (済 / 未) across multiple items
+  // Batch update issue status (済 / 未) across multiple items (strictly scoped to activeProjectId)
   const handleBatchUpdateIssueStatus = (itemIds: string[], isIssued: boolean) => {
     if (!itemIds.length) return;
+    const targetProjectId = activeProjectId;
     const nowStr = new Date().toLocaleString('ja-JP', { hour12: false });
     const statusText = isIssued ? '済' : '未';
+    const targetCount = items.filter(it => it.projectId === targetProjectId && itemIds.includes(it.id)).length;
+    if (targetCount === 0) return;
 
     setItems(prev => {
       const nextList = prev.map(it => {
-        if (it.projectId === activeProjectId && itemIds.includes(it.id)) {
+        if (it.projectId === targetProjectId && itemIds.includes(it.id)) {
           const oldStatus = it.isIssued ? '済' : '未';
           const issueLog: ChangeLog = {
             id: `hist-issue-${Date.now()}-${it.id.slice(-4)}`,
@@ -1165,13 +1178,13 @@ export default function App() {
         return it;
       });
 
-      const projectItems = nextList.filter(it => it.projectId === activeProjectId);
-      persistItemsToLinkedJson(activeProjectId, projectItems);
+      const projectItems = nextList.filter(it => it.projectId === targetProjectId);
+      persistItemsToLinkedJson(targetProjectId, projectItems);
       return nextList;
     });
 
     setHasUnsavedChanges(true);
-    setSyncNotice(`${itemIds.length}件の発行状態を「${statusText}」へ更新しました。`);
+    setSyncNotice(`${targetCount}件の発行状態を「${statusText}」へ更新しました。`);
     setTimeout(() => setSyncNotice(''), 5000);
   };
 
@@ -1267,6 +1280,24 @@ export default function App() {
         setIsEditModalOpen(false);
         setEditingItem(null);
       }
+    }
+  };
+
+  const handleBatchDeleteItems = (itemIds: string[]) => {
+    if (!itemIds.length) return;
+    const targetProjectId = activeProjectId;
+    setItems(prev => {
+      const remainingProject = prev.filter(it => it.projectId === targetProjectId && !itemIds.includes(it.id));
+      const otherItems = prev.filter(it => it.projectId !== targetProjectId);
+      const resequencedProject = resequenceProjectItems(remainingProject);
+      const nextList = [...resequencedProject, ...otherItems];
+      persistItemsToLinkedJson(targetProjectId, resequencedProject);
+      return nextList;
+    });
+    setHasUnsavedChanges(true);
+    if (editingItem && editingItem.projectId === targetProjectId && itemIds.includes(editingItem.id)) {
+      setIsEditModalOpen(false);
+      setEditingItem(null);
     }
   };
 
@@ -1469,11 +1500,13 @@ export default function App() {
         {/* Tab 1: Equipment Database */}
         {activeTab === 'database' && (
           <OrderDatabaseTab
-            items={items}
+            key={activeProjectId}
+            items={items.filter(i => i.projectId === activeProjectId)}
             categories={projectCategories}
             activeProjectId={activeProjectId}
             onEditItem={handleEditItem}
             onDeleteItem={handleDeleteItem}
+            onBatchDeleteItems={handleBatchDeleteItems}
             onAddNewItem={handleAddNewItem}
             onOpenChangeLog={() => setIsHistoryModalOpen(true)}
             onAddCategory={handleAddCategory}
