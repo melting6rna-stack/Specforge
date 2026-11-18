@@ -49,6 +49,14 @@ interface ProjectSummaryTabProps {
   isSyncing: boolean;
   onInstallPwa?: () => void;
   onDeleteProject?: (projectId: string) => void;
+  ledgerRecordsCount?: number;
+  isLedgerSyncing?: boolean;
+  onCreateNewLedgerFile?: (projectId: string) => void;
+  onRelinkLedgerFile?: (projectId: string) => void;
+  onReconnectLedgerFile?: (projectId: string) => void;
+  onSyncLedgerFile?: (projectId: string) => void;
+  onExportLedgerJson?: (projectId: string) => void;
+  onSwitchToRevisionTab?: () => void;
 }
 
 const parseClientNumberParts = (val?: string, part1?: string, part2?: string) => {
@@ -96,6 +104,14 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
   isSyncing,
   onInstallPwa,
   onDeleteProject,
+  ledgerRecordsCount = 0,
+  isLedgerSyncing = false,
+  onCreateNewLedgerFile,
+  onRelinkLedgerFile,
+  onReconnectLedgerFile,
+  onSyncLedgerFile,
+  onExportLedgerJson,
+  onSwitchToRevisionTab,
 }) => {
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [selectedProjectForEdit, setSelectedProjectForEdit] = useState<ProjectWorkspace | null>(null);
@@ -620,6 +636,172 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
                 >
                   <Edit3 className="w-3.5 h-3.5 text-indigo-600" />
                   <span>基本情報</span>
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Linked Specification Issuance Ledger JSON Status for Active Project */}
+      {currentProject && (
+        <div className={`p-4 rounded-xl border shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors ${
+          currentProject.isLedgerLinkError
+            ? 'bg-red-50/90 border-red-300 text-red-900'
+            : currentProject.needsLedgerPermission && currentProject.linkedLedgerFileName
+            ? 'bg-sky-50/90 border-sky-300 text-sky-950'
+            : currentProject.linkedLedgerFileName
+            ? 'bg-indigo-50/70 border-indigo-200 text-indigo-950'
+            : 'bg-slate-50 border-slate-300 text-slate-900'
+        }`}>
+          <div className="flex items-start gap-3">
+            {currentProject.isLedgerLinkError ? (
+              <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5 animate-pulse" />
+            ) : currentProject.needsLedgerPermission && currentProject.linkedLedgerFileName ? (
+              <RefreshCw className={`w-5 h-5 text-sky-600 shrink-0 mt-0.5 ${isLedgerSyncing ? 'animate-spin' : ''}`} />
+            ) : currentProject.linkedLedgerFileName ? (
+              <FileCheck className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
+            ) : (
+              <FileSpreadsheet className="w-5 h-5 text-slate-600 shrink-0 mt-0.5" />
+            )}
+
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-xs">
+                  {currentProject.isLedgerLinkError
+                    ? '【参照エラー】仕様書発行台帳JSONにアクセスできません'
+                    : currentProject.needsLedgerPermission && currentProject.linkedLedgerFileName
+                    ? '仕様書発行台帳JSON 紐づけ維持中（アクセス許可の再開待ち）'
+                    : currentProject.linkedLedgerFileName
+                    ? '仕様書発行台帳JSONと連動中 (機器DBと分離管理)'
+                    : '仕様書発行台帳JSONが未紐づけです（初回は無から新規作成できます）'}
+                </span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded font-mono bg-white/80 border border-slate-200 text-slate-700 font-bold">
+                  発行履歴: {ledgerRecordsCount}件
+                </span>
+              </div>
+
+              <p className="text-[11px] mt-0.5 leading-relaxed">
+                {currentProject.isLedgerLinkError ? (
+                  <span className="text-red-700 font-medium">
+                    {currentProject.ledgerErrorMessage || `台帳ファイル「${currentProject.linkedLedgerFileName}」が見つからないかアクセス権限が失われました。再紐づけまたは新規作成してください。`}
+                  </span>
+                ) : currentProject.needsLedgerPermission && currentProject.linkedLedgerFileName ? (
+                  <span className="text-sky-900">
+                    台帳ファイル: <strong className="font-mono">{currentProject.linkedLedgerFileName}</strong> — ブラウザ更新・別ウィンドウ後は右のボタンからアクセスを許可して連動を再開してください。
+                  </span>
+                ) : currentProject.linkedLedgerFileName ? (
+                  <span>
+                    台帳ファイル: <strong className="font-mono text-indigo-900">{currentProject.linkedLedgerFileName}</strong> · 最終同期: {currentProject.linkedLedgerLastSync || '確定時自動保存'}
+                  </span>
+                ) : (
+                  <span>
+                    初版・改訂版（Rev.0〜3）の確定スナップショットを機器DBとは別ファイルに保管します。共有フォルダ上に新規作成または既存JSONを紐づけてください。
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+            {currentProject.isLedgerLinkError ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onRelinkLedgerFile?.(currentProject.id)}
+                  className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                >
+                  <HardDrive className="w-3.5 h-3.5" />
+                  <span>既存台帳JSONを再指定</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onCreateNewLedgerFile?.(currentProject.id)}
+                  className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>新規作成</span>
+                </button>
+              </>
+            ) : currentProject.needsLedgerPermission && currentProject.linkedLedgerFileName ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onReconnectLedgerFile?.(currentProject.id)}
+                  disabled={isLedgerSyncing}
+                  className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-md text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLedgerSyncing ? 'animate-spin' : ''}`} />
+                  <span>台帳アクセス許可して再開</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRelinkLedgerFile?.(currentProject.id)}
+                  className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-md text-xs font-medium transition-colors cursor-pointer"
+                >
+                  <span>ファイル変更</span>
+                </button>
+              </>
+            ) : currentProject.linkedLedgerFileName ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onSyncLedgerFile?.(currentProject.id)}
+                  disabled={isLedgerSyncing}
+                  className="px-3 py-1.5 bg-white hover:bg-indigo-100 text-indigo-800 border border-indigo-300 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+                  title="共有台帳JSONから最新の発行履歴を読み直す"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLedgerSyncing ? 'animate-spin text-indigo-600' : ''}`} />
+                  <span>最新同期</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRelinkLedgerFile?.(currentProject.id)}
+                  className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-md text-xs font-medium transition-colors cursor-pointer"
+                >
+                  <span>ファイル変更</span>
+                </button>
+                {onExportLedgerJson && (
+                  <button
+                    type="button"
+                    onClick={() => onExportLedgerJson(currentProject.id)}
+                    className="px-2.5 py-1.5 bg-white hover:bg-slate-50 text-slate-600 border border-slate-300 rounded-md text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                    title="台帳JSONのコピーをダウンロード"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>DL</span>
+                  </button>
+                )}
+                {ledgerRecordsCount > 0 && onSwitchToRevisionTab && (
+                  <button
+                    type="button"
+                    onClick={onSwitchToRevisionTab}
+                    className="px-3 py-1.5 bg-rose-700 hover:bg-rose-800 text-white rounded-md text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+                  >
+                    <span>改訂画面へ</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onCreateNewLedgerFile?.(currentProject.id)}
+                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  title="空の仕様書発行台帳JSONを新規作成して紐づけます"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>新規台帳JSONを作成（無から作成）</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRelinkLedgerFile?.(currentProject.id)}
+                  className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 rounded-md text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  title="共有フォルダ等に既にある発行台帳JSONを選択して紐づけ"
+                >
+                  <Upload className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>既存台帳JSONを紐づけ</span>
                 </button>
               </>
             )}

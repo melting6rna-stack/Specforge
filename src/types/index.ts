@@ -180,4 +180,71 @@ export interface ProjectWorkspace {
   linkErrorMessage?: string; // エラーメッセージ
   schemaType?: 'tokki-equipment' | 'specforge-v2' | 'generic'; // スキーマ種別
   rawDocument?: any; // 特記仕様書スキーマの document オブジェクト
+  // 仕様書発行台帳 JSON 連動状態（機器データベースJSONとは完全分離）
+  linkedLedgerFileName?: string;
+  linkedLedgerLastSync?: string;
+  needsLedgerPermission?: boolean;
+  isLedgerLinkError?: boolean;
+  ledgerErrorMessage?: string;
 }
+
+export type RevisionNumber = 0 | 1 | 2 | 3;
+
+export interface RevisionHistoryEntry {
+  revision: 1 | 2 | 3;
+  revisionLabel: string; // 例: "Rev1", "Rev2", "Rev3"
+  revDate: string; // 改訂日 (YYYY-MM-DD)
+  revAuthor: string; // 改訂者
+  revSummary: string; // 変更内容
+}
+
+export interface SpecRevisionSnapshot {
+  revision: RevisionNumber;
+  revisionLabel: string; // "Rev0", "Rev1", "Rev2", "Rev3"
+  revDate: string;
+  revAuthor: string;
+  revSummary: string;
+  confirmedAt: string; // ISO 8601
+  docNo: string;
+  templateId: string;
+  templateName: string;
+  orderedItemIds: string[];
+  primaryItemId: string;
+  itemTagNos: string[];
+  itemNames: string[];
+  formValues: Record<string, any>;
+  cellOverrides: Record<string, string>;
+  customColWidths: Record<string, number>;
+  changedCells: string[]; // 直近リビジョンで赤文字・赤枠にするセル番地一覧
+  resolvedCellValues: Record<string, string>; // 確定時の全転記セル値マップ（次版の自動差分検出用）
+  revisionHistoryEntries: RevisionHistoryEntry[]; // Rev1〜該当版までの累積改訂履歴行
+}
+
+export interface SpecIssuanceRecord {
+  id: string;
+  projectId: string;
+  title: string; // 保管タイトル（機器番号範囲 例: "03-001～004", "03-001"）
+  docNo: string; // 仕様書番号
+  templateId: string;
+  templateName: string;
+  orderedItemIds: string[];
+  primaryItemId: string;
+  itemTagNos: string[];
+  itemNames: string[];
+  currentRevision: RevisionNumber;
+  revisions: SpecRevisionSnapshot[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SpecLedgerFile {
+  schemaType: 'specforge-issuance-ledger';
+  version: '1.0';
+  projectId: string;
+  projectOrderNo?: string;
+  projectCode?: string;
+  projectName?: string;
+  lastUpdated: string;
+  records: SpecIssuanceRecord[];
+}
+

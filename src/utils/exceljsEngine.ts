@@ -1,6 +1,19 @@
 import ExcelJS from 'exceljs';
-import { SpecTemplate, EquipmentItem, SpecFieldMapping, SpecMappingAssetFile } from '../types';
-import { normalizeSpecTemplate } from './templateUtils';
+import {
+  SpecTemplate,
+  EquipmentItem,
+  SpecFieldMapping,
+  SpecMappingAssetFile,
+  RevisionNumber,
+  RevisionHistoryEntry,
+} from '../types';
+import { normalizeSpecTemplate, REVISION_FIELD_DEFS } from './templateUtils';
+
+export interface ExcelRevisionContext {
+  revision: RevisionNumber;
+  entries: RevisionHistoryEntry[];
+  changedCells?: string[];
+}
 
 /**
  * Creates a professional fallback master Excel template if none was uploaded.
@@ -180,8 +193,218 @@ export async function createDefaultMasterWorkbook(template: SpecTemplate): Promi
   notesArea.alignment = { vertical: 'top', horizontal: 'left', wrapText: true };
   notesArea.border = borderThin;
 
+  // Section 4: Revision History Table (Rows 29-33 -> Rev.1〜Rev.3 at B31:E33)
+  worksheet.mergeCells('B29:H29');
+  const sec4 = worksheet.getCell('B29');
+  sec4.value = '4. 改訂・変更履歴 (Rev.1〜Rev.3)';
+  sec4.font = { name: 'Meiryo UI', size: 11, bold: true, color: { argb: 'FF1E293B' } };
+  sec4.fill = headerFill;
+  worksheet.getRow(29).height = 24;
+
+  worksheet.getRow(30).height = 20;
+  const revHeaders = [
+    { addr: 'B30', title: 'リビジョン' },
+    { addr: 'C30', title: '改訂日' },
+    { addr: 'D30', title: '改訂者' },
+  ];
+  for (const rh of revHeaders) {
+    const c = worksheet.getCell(rh.addr);
+    c.value = rh.title;
+    c.font = { name: 'Meiryo UI', size: 9, bold: true, color: { argb: 'FF1E293B' } };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+    c.alignment = { vertical: 'middle', horizontal: 'center' };
+    c.border = borderDark;
+  }
+  worksheet.mergeCells('E30:H30');
+  const revContentHeader = worksheet.getCell('E30');
+  revContentHeader.value = '変更内容';
+  revContentHeader.font = { name: 'Meiryo UI', size: 9, bold: true, color: { argb: 'FF1E293B' } };
+  revContentHeader.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+  revContentHeader.alignment = { vertical: 'middle', horizontal: 'center' };
+  revContentHeader.border = borderDark;
+
+  for (let r = 31; r <= 33; r++) {
+    worksheet.getRow(r).height = 20;
+    for (const col of ['B', 'C', 'D']) {
+      const c = worksheet.getCell(`${col}${r}`);
+      c.value = '';
+      c.font = { name: 'Meiryo UI', size: 9 };
+      c.alignment = { vertical: 'middle', horizontal: 'center' };
+      c.border = borderThin;
+    }
+    worksheet.mergeCells(`E${r}:H${r}`);
+    const contentCell = worksheet.getCell(`E${r}`);
+    contentCell.value = '';
+    contentCell.font = { name: 'Meiryo UI', size: 9 };
+    contentCell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+    contentCell.border = borderThin;
+  }
+
   const buffer = await workbook.xlsx.writeBuffer();
   return buffer as ArrayBuffer;
+}
+
+function getWorksheetMergeRanges(worksheet: ExcelJS.Worksheet): MergeRangeInfo[] {
+  const mergeList: MergeRangeInfo[] = [];
+  const rawMerges: string[] = [];
+  if (Array.isArray((worksheet as any).model?.merges)) {
+    rawMerges.push(...(worksheet as any).model.merges);
+  }
+  if ((worksheet as any)._merges) {
+    const mObj = (worksheet as any)._merges;
+    if (Array.isArray(mObj)) {
+      rawMerges.push(...mObj.map((m: any) => (typeof m === 'string' ? m : m?.range || '')));
+    } else if (typeof mObj === 'object') {
+      for (const k of Object.keys(mObj)) {
+        rawMerges.push(k);
+      }
+    }
+  }
+
+  const uniqueMerges = Array.from(new Set(rawMerges)).filter(Boolean);
+  for (const mStr of uniqueMerges) {
+    const parts = mStr.split(':');
+    if (parts.length === 2) {
+      const s = parseCellAddress(parts[0]);
+      const e = parseCellAddress(parts[1]);
+      if (s && e) {
+        mergeList.push({
+          top: Math.min(s.row, e.row),
+          left: Math.min(s.col, e.col),
+          bottom: Math.max(s.row, e.row),
+          right: Math.max(s.col, e.col),
+          colSpan: Math.abs(e.col - s.col) + 1,
+          rowSpan: Math.abs(e.row - s.row) + 1,
+          masterAddress: `${colIndexToLetter(Math.min(s.col, e.col))}${Math.min(s.row, e.row)}`,
+        });
+      }
+    }
+  }
+  return mergeList;
+}
+
+function applyRevisionFieldsToWorksheet(
+  worksheet: ExcelJS.Worksheet,
+  fields: SpecFieldMapping[],
+  revisionContext?: ExcelRevisionContext
+): Record<string, { id: string; label: string }> {
+  const mapped: Record<string, { id: string; label: string }> = {};
+  if (!revisionContext || revisionContext.revision <= 0) {
+    return mapped;
+  }
+
+  for (const revNum of [1, 2, 3] as const) {
+    if (revNum > revisionContext.revision) continue;
+    const entry = revisionContext.entries.find((e) => e.revision === revNum);
+    if (!entry) continue;
+
+    for (const def of REVISION_FIELD_DEFS) {
+      if (def.revision !== revNum) continue;
+      const field = fields.find((f) => f.id === def.id);
+      const addr = field?.cell?.trim().toUpperCase();
+      if (!addr) continue;
+
+      let value = '';
+      if (def.key === 'no') value = entry.revisionLabel || `Rev${revNum}`;
+      else if (def.key === 'date') value = entry.revDate || '';
+      else if (def.key === 'author') value = entry.revAuthor || '';
+      else if (def.key === 'content') value = entry.revSummary || '';
+
+      try {
+        worksheet.getCell(addr).value = value;
+        mapped[addr] = { id: def.id, label: def.label };
+      } catch (_) {}
+    }
+  }
+  return mapped;
+}
+
+function cloneExcelCellStyle(style: any): Record<string, any> {
+  if (!style || typeof style !== 'object') return {};
+  try {
+    return JSON.parse(JSON.stringify(style));
+  } catch {
+    return { ...style };
+  }
+}
+
+function applyChangedCellHighlightsToWorksheet(
+  worksheet: ExcelJS.Worksheet,
+  mergeList: MergeRangeInfo[],
+  changedCells?: string[]
+): Set<string> {
+  const highlightedAddresses = new Set<string>();
+  if (!changedCells || changedCells.length === 0) return highlightedAddresses;
+
+  const makeRedSide = (): ExcelJS.Border => ({
+    style: 'medium',
+    color: { argb: 'FFDC2626' },
+  });
+
+  for (const rawAddr of changedCells) {
+    const cleanAddr = String(rawAddr || '').trim().toUpperCase();
+    const parsed = parseCellAddress(cleanAddr);
+    if (!parsed) continue;
+
+    const mergeInfo = mergeList.find(
+      (m) => parsed.col >= m.left && parsed.col <= m.right && parsed.row >= m.top && parsed.row <= m.bottom
+    );
+
+    const masterAddr = mergeInfo ? mergeInfo.masterAddress : cleanAddr;
+    highlightedAddresses.add(masterAddr);
+
+    try {
+      if (mergeInfo) {
+        for (let r = mergeInfo.top; r <= mergeInfo.bottom; r++) {
+          for (let c = mergeInfo.left; c <= mergeInfo.right; c++) {
+            const subAddr = `${colIndexToLetter(c)}${r}`;
+            const subCell = worksheet.getCell(subAddr);
+            const prevSubStyle = cloneExcelCellStyle(subCell.style);
+            const isMaster = subAddr === masterAddr;
+
+            subCell.style = {
+              ...prevSubStyle,
+              ...(isMaster
+                ? {
+                    font: {
+                      ...(prevSubStyle.font || { name: 'Meiryo UI', size: 9 }),
+                      color: { argb: 'FFDC2626' },
+                      bold: true,
+                    },
+                  }
+                : {}),
+              border: {
+                ...(prevSubStyle.border || {}),
+                ...(r === mergeInfo.top ? { top: makeRedSide() } : {}),
+                ...(r === mergeInfo.bottom ? { bottom: makeRedSide() } : {}),
+                ...(c === mergeInfo.left ? { left: makeRedSide() } : {}),
+                ...(c === mergeInfo.right ? { right: makeRedSide() } : {}),
+              },
+            };
+          }
+        }
+      } else {
+        const targetCell = worksheet.getCell(masterAddr);
+        const prevStyle = cloneExcelCellStyle(targetCell.style);
+        targetCell.style = {
+          ...prevStyle,
+          font: {
+            ...(prevStyle.font || { name: 'Meiryo UI', size: 9 }),
+            color: { argb: 'FFDC2626' },
+            bold: true,
+          },
+          border: {
+            top: makeRedSide(),
+            left: makeRedSide(),
+            bottom: makeRedSide(),
+            right: makeRedSide(),
+          },
+        };
+      }
+    } catch (_) {}
+  }
+
+  return highlightedAddresses;
 }
 
 /**
@@ -196,7 +419,8 @@ export async function fillSpecificationExcel(
   items: EquipmentItem[],
   docInfo: Record<string, string>,
   cellOverrides?: Record<string, string>,
-  customColWidths?: Record<string, number>
+  customColWidths?: Record<string, number>,
+  revisionContext?: ExcelRevisionContext
 ): Promise<Uint8Array> {
   const workbook = new ExcelJS.Workbook();
 
@@ -248,6 +472,7 @@ export async function fillSpecificationExcel(
   const fields: SpecFieldMapping[] = normalizedTpl.fields || [];
 
   for (const field of fields) {
+    if (field.group === 'revision') continue;
     if (field.cell && field.cell.trim()) {
       const cellAddr = field.cell.trim().toUpperCase();
       const cell = worksheet.getCell(cellAddr);
@@ -327,7 +552,14 @@ export async function fillSpecificationExcel(
     }
   }
 
-  // 5. Apply Custom Column Widths
+  // 4. Inject Revision History Rows (only for Rev.1〜Rev.3 when revision > 0)
+  applyRevisionFieldsToWorksheet(worksheet, fields, revisionContext);
+
+  // 5. Highlight Changed Cells in Red Font & Red Border (latest revision only)
+  const mergeListForFill = getWorksheetMergeRanges(worksheet);
+  applyChangedCellHighlightsToWorksheet(worksheet, mergeListForFill, revisionContext?.changedCells);
+
+  // 6. Apply Custom Column Widths
   if (customColWidths) {
     for (const [colLetter, pixelWidth] of Object.entries(customColWidths)) {
       const colNum = colLetterToIndex(colLetter);
@@ -355,9 +587,18 @@ export async function downloadSpecificationExcel(
   docInfo: Record<string, string>,
   customFileName?: string,
   cellOverrides?: Record<string, string>,
-  customColWidths?: Record<string, number>
+  customColWidths?: Record<string, number>,
+  revisionContext?: ExcelRevisionContext
 ): Promise<void> {
-  const bytes = await fillSpecificationExcel(template, formValues, items, docInfo, cellOverrides, customColWidths);
+  const bytes = await fillSpecificationExcel(
+    template,
+    formValues,
+    items,
+    docInfo,
+    cellOverrides,
+    customColWidths,
+    revisionContext
+  );
   const blob = new Blob([bytes.buffer as ArrayBuffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   });
@@ -460,6 +701,7 @@ export interface RenderedCellData {
   isMapped?: boolean;
   mappedFieldId?: string;
   mappedFieldLabel?: string;
+  isChangedHighlight?: boolean;
 }
 
 export interface RenderedSheetGrid {
@@ -548,7 +790,8 @@ export async function renderSpecificationExcelGrid(
   docInfo: Record<string, string>,
   targetSheetOverride?: string,
   cellOverrides?: Record<string, string>,
-  customColWidths?: Record<string, number>
+  customColWidths?: Record<string, number>,
+  revisionContext?: ExcelRevisionContext
 ): Promise<RenderedSheetGrid> {
   const startTime = performance.now();
 
@@ -607,6 +850,7 @@ export async function renderSpecificationExcelGrid(
   const fields = normalizedTpl.fields || [];
   const fieldMappingMap: Record<string, { id: string; label: string }> = {};
   for (const field of fields) {
+    if (field.group === 'revision') continue;
     if (field.cell && field.cell.trim()) {
       const cleanAddr = field.cell.trim().toUpperCase();
       fieldMappingMap[cleanAddr] = { id: field.id, label: field.label };
@@ -695,42 +939,19 @@ export async function renderSpecificationExcelGrid(
     }
   }
 
-  // 4. Parse Merged Cells
-  const mergeList: MergeRangeInfo[] = [];
-  const rawMerges: string[] = [];
-  if (Array.isArray((worksheet as any).model?.merges)) {
-    rawMerges.push(...(worksheet as any).model.merges);
-  }
-  if ((worksheet as any)._merges) {
-    const mObj = (worksheet as any)._merges;
-    if (Array.isArray(mObj)) {
-      rawMerges.push(...mObj.map((m: any) => typeof m === 'string' ? m : m?.range || ''));
-    } else if (typeof mObj === 'object') {
-      for (const k of Object.keys(mObj)) {
-        rawMerges.push(k);
-      }
-    }
-  }
+  // 3.5. Inject Revision History Rows (Rev.1〜Rev.3 when revision > 0)
+  const revMapped = applyRevisionFieldsToWorksheet(worksheet, fields, revisionContext);
+  Object.assign(fieldMappingMap, revMapped);
 
-  const uniqueMerges = Array.from(new Set(rawMerges)).filter(Boolean);
-  for (const mStr of uniqueMerges) {
-    const parts = mStr.split(':');
-    if (parts.length === 2) {
-      const s = parseCellAddress(parts[0]);
-      const e = parseCellAddress(parts[1]);
-      if (s && e) {
-        mergeList.push({
-          top: Math.min(s.row, e.row),
-          left: Math.min(s.col, e.col),
-          bottom: Math.max(s.row, e.row),
-          right: Math.max(s.col, e.col),
-          colSpan: Math.abs(e.col - s.col) + 1,
-          rowSpan: Math.abs(e.row - s.row) + 1,
-          masterAddress: `${colIndexToLetter(Math.min(s.col, e.col))}${Math.min(s.row, e.row)}`
-        });
-      }
-    }
-  }
+  // 4. Parse Merged Cells
+  const mergeList: MergeRangeInfo[] = getWorksheetMergeRanges(worksheet);
+
+  // 4.5. Apply Changed Cells Red Font & Red Border Styling
+  const highlightedCellSet = applyChangedCellHighlightsToWorksheet(
+    worksheet,
+    mergeList,
+    revisionContext?.changedCells
+  );
 
   // 5. Determine sheet boundaries (columns and rows)
   let maxColIndex = 8; // At least H
@@ -923,7 +1144,8 @@ export async function renderSpecificationExcelGrid(
         rowSpan,
         isMapped: Boolean(mapped),
         mappedFieldId: mapped?.id,
-        mappedFieldLabel: mapped?.label
+        mappedFieldLabel: mapped?.label,
+        isChangedHighlight: highlightedCellSet.has(addr),
       });
     }
 
@@ -945,4 +1167,130 @@ export async function renderSpecificationExcelGrid(
     benchmarkMs
   };
 }
+
+/**
+ * Computes a flat { [cellAddress]: stringValue } snapshot for all specification/basic/detail/check/notes
+ * and override cells (excluding revision history cells) so consecutive revisions can be auto-diffed accurately.
+ */
+export function computeResolvedCellValues(
+  template: SpecTemplate,
+  formValues: Record<string, any>,
+  items: EquipmentItem[],
+  docInfo: Record<string, string>,
+  cellOverrides?: Record<string, string>
+): Record<string, string> {
+  const normalizedTpl = normalizeSpecTemplate(template);
+  const resolved: Record<string, string> = {};
+
+  const getItemVal = (it: EquipmentItem | undefined, label: string) => {
+    if (!it) return '';
+    const clean = label.toLowerCase();
+    if (clean.includes('機器番号') || clean.includes('tag')) return it.tagNo || '';
+    if (clean.includes('機器名') || clean.includes('名称')) return it.name || '';
+    if (clean.includes('数量')) return `${it.quantity} ${it.unit || '台'}`;
+    if (clean.includes('納期')) return it.deliveryDate || '';
+    if (clean.includes('特記') || clean.includes('備考')) return it.notes || '';
+    if (clean.includes('口径') && it.diameter && it.diameter !== '-') return it.diameter;
+    if (clean.includes('材質') && it.material && it.material !== '-') return it.material;
+    if (it.specs && it.specs.length > 0) {
+      for (const sp of it.specs) {
+        if (clean.includes(sp.name.toLowerCase()) || sp.name.toLowerCase().includes(clean)) {
+          return `${sp.value}${sp.unit ? ' ' + sp.unit : ''}`;
+        }
+      }
+    }
+    return '';
+  };
+
+  const fields = normalizedTpl.fields || [];
+  const revCellSet = new Set(
+    fields
+      .filter((f) => f.group === 'revision' && f.cell)
+      .map((f) => f.cell.trim().toUpperCase())
+  );
+
+  for (const field of fields) {
+    if (field.group === 'revision') continue;
+
+    if (field.cell && field.cell.trim()) {
+      const addr1 = field.cell.trim().toUpperCase();
+      const rawVal = formValues[field.id];
+      if (field.type === 'checkbox') {
+        const isChecked = Boolean(rawVal);
+        resolved[addr1] = isChecked
+          ? field.checkboxConfig?.checkedValue || '☑ 要'
+          : field.checkboxConfig?.uncheckedValue || '☐ 不要';
+      } else if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
+        resolved[addr1] = String(rawVal);
+      } else if (field.group === 'detail') {
+        resolved[addr1] = getItemVal(items[0], field.label);
+      } else if (field.defaultValue !== undefined && field.defaultValue !== '') {
+        resolved[addr1] = String(field.defaultValue);
+      } else {
+        resolved[addr1] = '';
+      }
+    }
+
+    if (field.cellSlot2 && field.cellSlot2.trim()) {
+      const addr2 = field.cellSlot2.trim().toUpperCase();
+      const key2 = `${field.id}__slot2`;
+      const val2 = formValues[key2] !== undefined ? formValues[key2] : getItemVal(items[1], field.label);
+      resolved[addr2] = val2 !== undefined && val2 !== null ? String(val2) : '';
+    }
+    if (field.cellSlot3 && field.cellSlot3.trim()) {
+      const addr3 = field.cellSlot3.trim().toUpperCase();
+      const key3 = `${field.id}__slot3`;
+      const val3 = formValues[key3] !== undefined ? formValues[key3] : getItemVal(items[2], field.label);
+      resolved[addr3] = val3 !== undefined && val3 !== null ? String(val3) : '';
+    }
+    if (field.cellSlot4 && field.cellSlot4.trim()) {
+      const addr4 = field.cellSlot4.trim().toUpperCase();
+      const key4 = `${field.id}__slot4`;
+      const val4 = formValues[key4] !== undefined ? formValues[key4] : getItemVal(items[3], field.label);
+      resolved[addr4] = val4 !== undefined && val4 !== null ? String(val4) : '';
+    }
+  }
+
+  if (normalizedTpl.cellMappings) {
+    for (const cm of normalizedTpl.cellMappings) {
+      if (!cm.cell || !cm.fieldKey) continue;
+      const addr = cm.cell.trim().toUpperCase();
+      if (!revCellSet.has(addr) && docInfo[cm.fieldKey] !== undefined && docInfo[cm.fieldKey] !== null) {
+        resolved[addr] = String(docInfo[cm.fieldKey]);
+      }
+    }
+  }
+
+  if (cellOverrides) {
+    for (const [addr, val] of Object.entries(cellOverrides)) {
+      const cleanAddr = addr.trim().toUpperCase();
+      if (cleanAddr && val !== undefined && !revCellSet.has(cleanAddr)) {
+        resolved[cleanAddr] = String(val);
+      }
+    }
+  }
+
+  return resolved;
+}
+
+/**
+ * Returns sorted cell addresses where values changed between two resolved cell maps.
+ */
+export function diffResolvedCellValues(
+  prevMap: Record<string, string> | undefined,
+  nextMap: Record<string, string> | undefined
+): string[] {
+  if (!prevMap || !nextMap) return [];
+  const allKeys = new Set([...Object.keys(prevMap), ...Object.keys(nextMap)]);
+  const changed: string[] = [];
+  for (const addr of allKeys) {
+    const prevVal = String(prevMap[addr] ?? '').trim();
+    const nextVal = String(nextMap[addr] ?? '').trim();
+    if (prevVal !== nextVal) {
+      changed.push(addr.toUpperCase());
+    }
+  }
+  return changed.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
 

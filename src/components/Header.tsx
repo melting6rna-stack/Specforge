@@ -2,6 +2,7 @@ import React from 'react';
 import { 
   Database, 
   FileText, 
+  GitBranch,
   Settings2, 
   FolderKanban, 
   HardDrive,
@@ -15,13 +16,16 @@ import {
 import { ProjectWorkspace } from '../types';
 import brandLogoUrl from '../assets/brand-logo.png?inline';
 
+export type AppTab = 'database' | 'spec_initial' | 'spec_revision' | 'templates' | 'projects';
+
 interface HeaderProps {
-  activeTab: 'database' | 'spec_studio' | 'templates' | 'projects';
-  onTabChange: (tab: 'database' | 'spec_studio' | 'templates' | 'projects') => void;
+  activeTab: AppTab;
+  onTabChange: (tab: AppTab) => void;
   projects: ProjectWorkspace[];
   activeProjectId: string;
   onProjectChange: (projectId: string) => void;
   totalItemsCount: number;
+  ledgerRecordsCount?: number;
   isSyncing: boolean;
   onManualSync: () => void;
   onRelinkFile: () => void;
@@ -40,6 +44,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeProjectId,
   onProjectChange,
   totalItemsCount,
+  ledgerRecordsCount = 0,
   isSyncing,
   onManualSync,
   onRelinkFile,
@@ -55,7 +60,7 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="border-b border-slate-200 bg-white sticky top-0 z-30 shadow-2xs">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-14 gap-4">
+        <div className="flex items-center justify-between h-14 gap-3">
           
           {/* Zone 1: Brand & Current Workspace */}
           <div className="flex items-center gap-3 shrink-0">
@@ -68,7 +73,7 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="flex items-center gap-2">
                 <span className="font-bold text-sm tracking-tight text-slate-900">SpecForge</span>
                 <span className="text-xs text-slate-300">|</span>
-                <span className="text-xs font-medium text-slate-600 truncate max-w-[180px]">
+                <span className="text-xs font-medium text-slate-600 truncate max-w-[150px]">
                   {currentProject?.name}
                 </span>
                 <span className="text-[11px] font-mono text-slate-400 tabular-nums">({totalItemsCount}点)</span>
@@ -77,10 +82,10 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Zone 2: Navigation Links */}
-          <nav className="flex items-center gap-1 sm:gap-1.5">
+          <nav className="flex items-center gap-1 overflow-x-auto">
             <button
               onClick={() => onTabChange('database')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+              className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
                 activeTab === 'database'
                   ? 'bg-slate-900 text-white font-semibold'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
@@ -91,20 +96,41 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             <button
-              onClick={() => onTabChange('spec_studio')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 ${
-                activeTab === 'spec_studio'
+              onClick={() => onTabChange('spec_initial')}
+              className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+                activeTab === 'spec_initial'
                   ? 'bg-slate-900 text-white font-semibold'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
               }`}
             >
               <FileText className="w-3.5 h-3.5" />
-              <span>仕様書プレビュー・出力</span>
+              <span>仕様書作成</span>
+            </button>
+
+            <button
+              onClick={() => onTabChange('spec_revision')}
+              className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+                activeTab === 'spec_revision'
+                  ? 'bg-rose-700 text-white font-semibold shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <GitBranch className="w-3.5 h-3.5" />
+              <span>仕様書改訂</span>
+              {ledgerRecordsCount > 0 && (
+                <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+                  activeTab === 'spec_revision'
+                    ? 'bg-rose-900 text-rose-100'
+                    : 'bg-slate-200 text-slate-700'
+                }`}>
+                  {ledgerRecordsCount}
+                </span>
+              )}
             </button>
 
             <button
               onClick={() => onTabChange('projects')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+              className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
                 activeTab === 'projects'
                   ? 'bg-slate-900 text-white font-semibold'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'

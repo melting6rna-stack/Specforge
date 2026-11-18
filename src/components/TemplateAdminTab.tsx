@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { SpecTemplate, SpecFieldMapping, SpecMappingAssetFile, EquipmentItem, ProjectWorkspace } from '../types';
 import { exportMappingAssetAsJson, importMappingAssetFromJson, createDefaultMasterWorkbook } from '../utils/exceljsEngine';
-import { normalizeSpecTemplate } from '../utils/templateUtils';
+import { normalizeSpecTemplate, REVISION_FIELD_DEFS } from '../utils/templateUtils';
 
 interface TemplateAdminTabProps {
   templates: SpecTemplate[];
@@ -379,7 +379,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
 
   const specFields = React.useMemo(() => {
     return (activeTpl?.fields || []).filter(
-      f => f.type !== 'checkbox' && f.group !== 'basic' && f.group !== 'detail'
+      f => f.type !== 'checkbox' && f.group !== 'basic' && f.group !== 'detail' && f.group !== 'revision'
     );
   }, [activeTpl]);
 
@@ -390,6 +390,21 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
   const basicFields = React.useMemo(() => {
     return (activeTpl?.fields || []).filter(f => f.group === 'basic');
   }, [activeTpl]);
+
+  const revisionFields = React.useMemo(() => {
+    return (activeTpl?.fields || []).filter(f => f.group === 'revision');
+  }, [activeTpl]);
+
+  const handleApplyBuiltinRevisionCells = () => {
+    if (!editingTemplate) return;
+    setEditingTemplate({
+      ...editingTemplate,
+      fields: (editingTemplate.fields || []).map(f => {
+        const def = REVISION_FIELD_DEFS.find(d => d.id === f.id);
+        return def ? { ...f, cell: def.builtinCell } : f;
+      })
+    });
+  };
 
   return (
     <div className="space-y-4">
@@ -667,7 +682,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                 }`}
               >
                 <Layers className="w-3.5 h-3.5" />
-                <span>基本情報マッピング ({basicFields.length})</span>
+                <span>基本情報マッピング ({basicFields.length} + 履歴{revisionFields.length})</span>
               </button>
               <button
                 onClick={() => setActiveTabSub('asset')}
@@ -1074,61 +1089,143 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
             </div>
           )}
 
-          {/* Sub Tab: Basic Info Mapping (基本情報マッピング - 固定5項目) */}
+          {/* Sub Tab: Basic Info Mapping (基本情報マッピング - 固定5項目 + 変更履歴Rev.1〜3) */}
           {activeTabSub === 'basic' && (
-            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                <div>
-                  <h2 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                    <Layers className="w-4 h-4 text-indigo-600" />
-                    <span>基本情報マッピング（固定5項目）</span>
-                  </h2>
-                  <p className="text-[11px] text-slate-500">
-                    オーダーNo.・案件名・客先名・仕様書番号・発行日の5項目をExcel原本のどのセルへ書き込むか設定します。（項目は固定・セル番地のみ入力可）
-                  </p>
+            <div className="space-y-4">
+              <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <div>
+                    <h2 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <Layers className="w-4 h-4 text-indigo-600" />
+                      <span>基本情報マッピング（固定5項目）</span>
+                    </h2>
+                    <p className="text-[11px] text-slate-500">
+                      オーダーNo.・案件名・客先名・仕様書番号・発行日の5項目をExcel原本のどのセルへ書き込むか設定します。（項目は固定・セル番地のみ入力可）
+                    </p>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
+                      <tr>
+                        <th className="p-2.5 w-52">基本情報項目 (固定)</th>
+                        <th className="p-2.5 w-44">マッピングセル番地</th>
+                        <th className="p-2.5">連動元</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {basicFields.map((field) => (
+                        <tr
+                          key={field.id}
+                          className={isEditing ? 'bg-indigo-50/20 hover:bg-indigo-50/40' : 'hover:bg-slate-50/70'}
+                        >
+                          <td className="p-2.5 font-bold text-slate-900">
+                            {field.label}
+                          </td>
+                          <td className="p-2.5">
+                            {isEditing ? (
+                              <input
+                                type="text"
+                                value={field.cell}
+                                onChange={(e) => handleUpdateField(field.id, { cell: e.target.value.toUpperCase() })}
+                                className="w-32 text-xs font-mono font-bold bg-white border border-indigo-300 rounded px-2.5 py-1 text-indigo-800 focus:ring-1 focus:ring-indigo-500 focus:outline-hidden"
+                                placeholder="例: C3"
+                              />
+                            ) : (
+                              <span className="font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded">
+                                {field.cell || '-'}
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-2.5 text-[11px] text-slate-500">
+                            {field.description || '案件サマリー一律反映'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
-                    <tr>
-                      <th className="p-2.5 w-52">基本情報項目 (固定)</th>
-                      <th className="p-2.5 w-44">マッピングセル番地</th>
-                      <th className="p-2.5">連動元</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {basicFields.map((field) => (
-                      <tr
-                        key={field.id}
-                        className={isEditing ? 'bg-indigo-50/20 hover:bg-indigo-50/40' : 'hover:bg-slate-50/70'}
-                      >
-                        <td className="p-2.5 font-bold text-slate-900">
-                          {field.label}
-                        </td>
-                        <td className="p-2.5">
-                          {isEditing ? (
-                            <input
-                              type="text"
-                              value={field.cell}
-                              onChange={(e) => handleUpdateField(field.id, { cell: e.target.value.toUpperCase() })}
-                              className="w-32 text-xs font-mono font-bold bg-white border border-indigo-300 rounded px-2.5 py-1 text-indigo-800 focus:ring-1 focus:ring-indigo-500 focus:outline-hidden"
-                              placeholder="例: C3"
-                            />
-                          ) : (
-                            <span className="font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded">
-                              {field.cell || '-'}
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-2.5 text-[11px] text-slate-500">
-                          {field.description || '案件サマリー一律反映'}
-                        </td>
+              {/* Revision History Table Mapping (Rev.1〜Rev.3 × 4 columns) */}
+              <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                  <div>
+                    <h2 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <Calendar className="w-4 h-4 text-rose-600" />
+                      <span>変更履歴欄マッピング（Rev.1〜Rev.3）</span>
+                    </h2>
+                    <p className="text-[11px] text-slate-500">
+                      リビジョン0では入力せず、Rev.1は1段目、Rev.2はその下の段、Rev.3は3段目に「リビジョン番号・改訂日・改訂者・変更内容」を転記します。
+                    </p>
+                  </div>
+                  {isEditing && (
+                    <button
+                      type="button"
+                      onClick={handleApplyBuiltinRevisionCells}
+                      className="px-2.5 py-1 text-[11px] font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded transition-colors cursor-pointer shrink-0"
+                    >
+                      内蔵雛形用の標準セル(B31〜E33)を自動入力
+                    </button>
+                  )}
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
+                      <tr>
+                        <th className="p-2.5 w-28">版数（段）</th>
+                        <th className="p-2.5">リビジョン番号 <span className="text-[10px] font-normal text-slate-400">(例: Rev1)</span></th>
+                        <th className="p-2.5">改訂日</th>
+                        <th className="p-2.5">改訂者</th>
+                        <th className="p-2.5">変更内容</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {([1, 2, 3] as const).map((revNum) => {
+                        const defs = REVISION_FIELD_DEFS.filter(d => d.revision === revNum);
+                        return (
+                          <tr
+                            key={revNum}
+                            className={isEditing ? 'bg-rose-50/15 hover:bg-rose-50/30' : 'hover:bg-slate-50/70'}
+                          >
+                            <td className="p-2.5 font-bold text-slate-900">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-mono text-[11px]">
+                                Rev.{revNum} ({revNum}段目)
+                              </span>
+                            </td>
+                            {defs.map((def) => {
+                              const field = revisionFields.find(f => f.id === def.id);
+                              const cellVal = field?.cell || '';
+                              return (
+                                <td key={def.id} className="p-2.5">
+                                  {isEditing ? (
+                                    <input
+                                      type="text"
+                                      value={cellVal}
+                                      onChange={(e) => handleUpdateField(def.id, { cell: e.target.value.toUpperCase() })}
+                                      className="w-24 text-xs font-mono font-bold bg-white border border-rose-300 rounded px-2 py-1 text-rose-900 focus:ring-1 focus:ring-rose-500 focus:outline-hidden placeholder-slate-300"
+                                      placeholder={`例: ${def.builtinCell}`}
+                                    />
+                                  ) : (
+                                    <span className={`font-mono font-bold px-2 py-0.5 rounded border ${
+                                      cellVal
+                                        ? 'text-rose-700 bg-rose-50 border-rose-200'
+                                        : 'text-slate-400 bg-slate-50 border-slate-200 font-normal'
+                                    }`}>
+                                      {cellVal || '未設定'}
+                                    </span>
+                                  )}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}

@@ -94,16 +94,49 @@ export const DETAIL_FIELD_DEFS: DetailFieldDefinition[] = [
 
 const DETAIL_LABEL_SET = new Set(DETAIL_FIELD_DEFS.map(d => d.label));
 
+export interface RevisionFieldDefinition {
+  id: string;
+  revision: 1 | 2 | 3;
+  key: 'no' | 'date' | 'author' | 'content';
+  label: string;
+  shortLabel: string;
+  builtinCell: string;
+  type: 'text' | 'date';
+  description: string;
+}
+
+export const REVISION_FIELD_DEFS: RevisionFieldDefinition[] = [
+  // Rev 1
+  { id: 'f-rev1-no', revision: 1, key: 'no', label: 'Rev1 リビジョン番号', shortLabel: 'リビジョン番号', builtinCell: 'B31', type: 'text', description: 'Rev.1の版番号（例: Rev1）' },
+  { id: 'f-rev1-date', revision: 1, key: 'date', label: 'Rev1 改訂日', shortLabel: '改訂日', builtinCell: 'C31', type: 'date', description: 'Rev.1の改訂年月日' },
+  { id: 'f-rev1-author', revision: 1, key: 'author', label: 'Rev1 改訂者', shortLabel: '改訂者', builtinCell: 'D31', type: 'text', description: 'Rev.1の改訂担当者' },
+  { id: 'f-rev1-content', revision: 1, key: 'content', label: 'Rev1 変更内容', shortLabel: '変更内容', builtinCell: 'E31', type: 'text', description: 'Rev.1の変更内容概要' },
+  // Rev 2
+  { id: 'f-rev2-no', revision: 2, key: 'no', label: 'Rev2 リビジョン番号', shortLabel: 'リビジョン番号', builtinCell: 'B32', type: 'text', description: 'Rev.2の版番号（例: Rev2）' },
+  { id: 'f-rev2-date', revision: 2, key: 'date', label: 'Rev2 改訂日', shortLabel: '改訂日', builtinCell: 'C32', type: 'date', description: 'Rev.2の改訂年月日' },
+  { id: 'f-rev2-author', revision: 2, key: 'author', label: 'Rev2 改訂者', shortLabel: '改訂者', builtinCell: 'D32', type: 'text', description: 'Rev.2の改訂担当者' },
+  { id: 'f-rev2-content', revision: 2, key: 'content', label: 'Rev2 変更内容', shortLabel: '変更内容', builtinCell: 'E32', type: 'text', description: 'Rev.2の変更内容概要' },
+  // Rev 3
+  { id: 'f-rev3-no', revision: 3, key: 'no', label: 'Rev3 リビジョン番号', shortLabel: 'リビジョン番号', builtinCell: 'B33', type: 'text', description: 'Rev.3の版番号（例: Rev3）' },
+  { id: 'f-rev3-date', revision: 3, key: 'date', label: 'Rev3 改訂日', shortLabel: '改訂日', builtinCell: 'C33', type: 'date', description: 'Rev.3の改訂年月日' },
+  { id: 'f-rev3-author', revision: 3, key: 'author', label: 'Rev3 改訂者', shortLabel: '改訂者', builtinCell: 'D33', type: 'text', description: 'Rev.3の改訂担当者' },
+  { id: 'f-rev3-content', revision: 3, key: 'content', label: 'Rev3 変更内容', shortLabel: '変更内容', builtinCell: 'E33', type: 'text', description: 'Rev.3の変更内容概要' },
+];
+
+const REVISION_ID_SET = new Set(REVISION_FIELD_DEFS.map(r => r.id));
+
 /**
  * Ensures any template (preset, saved in localStorage, or imported from legacy JSON):
  * 1. Has strictly the 5 fixed `group: 'basic'` fields (オーダーNo., 案件名, 客先名, 仕様書番号, 発行日),
  *    preserving any previously mapped cell addresses.
- * 2. Has the 4 individual detail cell mappings (機器名, 数量, 納期, 特記事項) as `group: 'detail'` fields,
+ * 2. Has the 12 revision history fields (`group: 'revision'`) for Rev.1〜Rev.3 (4 columns each).
+ * 3. Has the 4 individual detail cell mappings (機器名, 数量, 納期, 特記事項) as `group: 'detail'` fields,
  *    migrating from legacy `tableMapping` if needed, and removes legacy column-based tableMapping.
  */
 export function normalizeSpecTemplate(tpl: SpecTemplate): SpecTemplate {
   const existingFields: SpecFieldMapping[] = Array.isArray(tpl.fields) ? [...tpl.fields] : [];
   const startRow = tpl.tableMapping?.startRow || 15;
+  const usesBuiltinWorkbook = tpl.sourceType === 'preset' && !tpl.rawWorkbookBase64 && !tpl.masterWorkbookBase64;
 
   const basicFields: SpecFieldMapping[] = BASIC_FIELD_DEFS.map(def => {
     const existing = existingFields.find(f => {
@@ -122,6 +155,19 @@ export function normalizeSpecTemplate(tpl: SpecTemplate): SpecTemplate {
       type: def.type,
       group: 'basic',
       defaultValue: existing?.defaultValue ?? (def.type === 'date' ? new Date().toISOString().slice(0, 10) : ''),
+      description: def.description
+    };
+  });
+
+  const revisionFields: SpecFieldMapping[] = REVISION_FIELD_DEFS.map(def => {
+    const existing = existingFields.find(f => f.id === def.id);
+    return {
+      id: def.id,
+      label: def.label,
+      cell: existing?.cell !== undefined ? existing.cell : (usesBuiltinWorkbook ? def.builtinCell : ''),
+      type: def.type,
+      group: 'revision',
+      defaultValue: existing?.defaultValue ?? (def.key === 'no' ? `Rev${def.revision}` : ''),
       description: def.description
     };
   });
@@ -166,10 +212,11 @@ export function normalizeSpecTemplate(tpl: SpecTemplate): SpecTemplate {
     };
   });
 
-  // Keep all non-basic, non-detail fields (check, spec, notes)
+  // Keep all non-basic, non-revision, non-detail fields (check, spec, notes)
   const otherFields = existingFields.filter(f => {
-    if (f.group === 'basic' || f.group === 'detail') return false;
+    if (f.group === 'basic' || f.group === 'detail' || f.group === 'revision') return false;
     if (BASIC_FIELD_DEFS.some(b => b.matchIds.includes(f.id))) return false;
+    if (REVISION_ID_SET.has(f.id)) return false;
     if (DETAIL_FIELD_DEFS.some(d => d.id === f.id)) return false;
     if (f.group === undefined && DETAIL_LABEL_SET.has(f.label) && f.id.startsWith('f-detail-')) return false;
     return true;
@@ -179,7 +226,8 @@ export function normalizeSpecTemplate(tpl: SpecTemplate): SpecTemplate {
 
   return {
     ...rest,
-    fields: [...basicFields, ...detailFields, ...otherFields]
+    fields: [...basicFields, ...revisionFields, ...detailFields, ...otherFields]
   };
 }
+
 

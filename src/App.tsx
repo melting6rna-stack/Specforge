@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Header } from './components/Header';
+import { Header, AppTab } from './components/Header';
 import { OrderDatabaseTab } from './components/OrderDatabaseTab';
 import { SpecDashboardTab } from './components/SpecDashboardTab';
 import { TemplateAdminTab } from './components/TemplateAdminTab';
@@ -9,7 +9,16 @@ import { ItemCreateModal } from './components/ItemCreateModal';
 import { ChangeHistoryModal } from './components/ChangeHistoryModal';
 import { PwaInstallGuideModal } from './components/PwaInstallGuideModal';
 import { UnsavedChangesModal } from './components/UnsavedChangesModal';
-import { EquipmentItem, Category, SpecTemplate, ProjectWorkspace, ChangeLog, EquipmentClassification } from './types';
+import {
+  EquipmentItem,
+  Category,
+  SpecTemplate,
+  ProjectWorkspace,
+  ChangeLog,
+  EquipmentClassification,
+  SpecIssuanceRecord,
+  SpecLedgerFile,
+} from './types';
 import { placeItemWithResequence, resequenceProjectItems } from './utils/tagNumbering';
 import { DEFAULT_TEMPLATES } from './data/defaultTemplates';
 import { INITIAL_PROJECTS, INITIAL_CATEGORIES, INITIAL_ITEMS } from './data/sampleOrders';
@@ -28,10 +37,29 @@ import {
   writeToProjectHandle,
   normalizeEquipmentType
 } from './utils/sharedSyncManager';
+import {
+  saveLedgerHandleForProject,
+  getSavedLedgerHandleForProject,
+  removeSavedLedgerHandleForProject,
+  createEmptyLedgerPayload,
+  normalizeLedgerJson,
+  readLedgerFromHandle,
+  writeLedgerToHandle,
+} from './utils/ledgerSyncManager';
 import { Bell, AlertTriangle, RefreshCw, HardDrive, Save, Link2 } from 'lucide-react';
 
 function sanitizeProjectsForStorage(list: ProjectWorkspace[]): ProjectWorkspace[] {
-  return list.map(({ isLinkError, linkErrorMessage, needsLinkPermission, ...rest }) => rest);
+  return list.map(
+    ({
+      isLinkError,
+      linkErrorMessage,
+      needsLinkPermission,
+      needsLedgerPermission,
+      isLedgerLinkError,
+      ledgerErrorMessage,
+      ...rest
+    }) => rest
+  );
 }
 
 function ensureItemEquipmentTypes(list: EquipmentItem[]): EquipmentItem[] {
@@ -138,6 +166,18 @@ export default function App() {
     }
   }, [templates]);
 
+  // Specification Issuance Ledger JSON state (strictly separate from Equipment DB!)
+  const [specLedgers, setSpecLedgers] = useState<Record<string, SpecLedgerFile>>(() => {
+    try {
+      const saved = localStorage.getItem('specforge_ledgers_v1');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Failed to parse saved spec ledgers', e);
+    }
+    return {};
+  });
+  const [isLedgerSyncing, setIsLedgerSyncing] = useState<boolean>(false);
+
   // Sync state
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncNotice, setSyncNotice] = useState<string>('');
@@ -146,8 +186,16 @@ export default function App() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
   const [isSavingJson, setIsSavingJson] = useState<boolean>(false);
 
-  // Tab State
-  const [activeTab, setActiveTab] = useState<'database' | 'spec_studio' | 'templates' | 'projects'>('database');
+  // Tab State (Initial Creation & Revision are separate tabs)
+  const [activeTab, setActiveTab] = useState<AppTab>('database');
+  const [lastSpecTab, setLastSpecTab] = useState<'spec_initial' | 'spec_revision'>('spec_initial');
+
+  const handleTabChange = useCallback((nextTab: AppTab) => {
+    if (nextTab === 'spec_initial' || nextTab === 'spec_revision') {
+      setLastSpecTab(nextTab);
+    }
+    setActiveTab(nextTab);
+  }, []);
 
   // Modals
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -164,10 +212,13 @@ export default function App() {
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
   const [isPwaGuideOpen, setIsPwaGuideOpen] = useState(false);
 
-  // Active Project's File Handle
+  // Active Project's File Handles (Equipment DB & Issuance Ledger kept strictly separate)
   const activeFileHandleRef = useRef<FileSystemFileHandle | null>(null);
+  const activeLedgerHandleRef = useRef<FileSystemFileHandle | null>(null);
 
   const currentProject = projects.find(p => p.id === activeProjectId) || projects[0];
+  const activeLedger = specLedgers[activeProjectId];
+  const activeLedgerRecords = useMemo(() => activeLedger?.records || [], [activeLedger]);
 
   // Prevent data loss: Native browser confirmation modal on close / reload / navigate away
   useEffect(() => {
@@ -233,6 +284,14 @@ export default function App() {
     localStorage.setItem('specforge_items_v2', JSON.stringify(items));
   }, [items]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('specforge_ledgers_v1', JSON.stringify(specLedgers));
+    } catch (e) {
+      console.warn('Failed to save spec ledgers to localStorage', e);
+    }
+  }, [specLedgers]);
+
   // Cross-window synchronization via storage events (keeps multiple open windows in sync)
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
@@ -246,7 +305,10 @@ export default function App() {
               ...inc,
               needsLinkPermission: existing.needsLinkPermission,
               isLinkError: existing.isLinkError,
-              linkErrorMessage: existing.linkErrorMessage
+              linkErrorMessage: existing.linkErrorMessage,
+              needsLedgerPermission: existing.needsLedgerPermission,
+              isLedgerLinkError: existing.isLedgerLinkError,
+              ledgerErrorMessage: existing.ledgerErrorMessage,
             } : inc;
           }));
         } else if (e.key === 'specforge_items_v2') {
@@ -258,6 +320,8 @@ export default function App() {
           if (Array.isArray(parsed)) {
             setTemplates(parsed.map(normalizeSpecTemplate));
           }
+        } else if (e.key === 'specforge_ledgers_v1') {
+          setSpecLedgers(JSON.parse(e.newValue));
         }
       } catch (err) {
         console.warn('Failed to sync storage event across windows', err);
@@ -380,39 +444,148 @@ export default function App() {
     };
   }, [activeProjectId]);
 
+  // Load active project Specification Issuance Ledger handle from IndexedDB when activeProjectId changes
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadLedgerHandle() {
+      activeLedgerHandleRef.current = null;
+      if (!activeProjectId) return;
+      const handle = await getSavedLedgerHandleForProject(activeProjectId);
+      if (isCancelled) return;
+      activeLedgerHandleRef.current = handle;
+
+      if (handle) {
+        try {
+          const prj = projects.find(p => p.id === activeProjectId);
+          const { ledger, fileName } = await readLedgerFromHandle(
+            handle,
+            activeProjectId,
+            prj,
+            { allowPromptRequest: false }
+          );
+          if (isCancelled) return;
+
+          setSpecLedgers(prev => ({
+            ...prev,
+            [activeProjectId]: ledger,
+          }));
+
+          setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+            ...p,
+            linkedLedgerFileName: fileName || p.linkedLedgerFileName,
+            linkedLedgerLastSync: new Date().toLocaleTimeString('ja-JP'),
+            needsLedgerPermission: false,
+            isLedgerLinkError: false,
+            ledgerErrorMessage: undefined,
+          } : p));
+        } catch (err: any) {
+          if (isCancelled) return;
+          if (err instanceof PermissionRequiredError) {
+            setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+              ...p,
+              linkedLedgerFileName: handle.name || p.linkedLedgerFileName,
+              needsLedgerPermission: true,
+              isLedgerLinkError: false,
+              ledgerErrorMessage: undefined,
+            } : p));
+          } else {
+            console.warn('Failed to read from linked ledger JSON for project', activeProjectId, err);
+            setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+              ...p,
+              needsLedgerPermission: false,
+              isLedgerLinkError: true,
+              ledgerErrorMessage: err.message || '紐づけ元の発行台帳JSONファイルが見つかりません。',
+            } : p));
+          }
+        }
+      } else {
+        setProjects(prev => prev.map(p => {
+          if (p.id === activeProjectId && p.linkedLedgerFileName) {
+            return {
+              ...p,
+              needsLedgerPermission: false,
+              isLedgerLinkError: true,
+              ledgerErrorMessage: `このブラウザ環境には発行台帳JSON「${p.linkedLedgerFileName}」の参照が保持されていません。「別台帳を指定」から再紐づけしてください。`,
+            };
+          }
+          return p;
+        }));
+      }
+    }
+
+    loadLedgerHandle();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeProjectId]);
+
   // Re-check permission silently when window regains focus (e.g. if granted in browser/another tab)
   useEffect(() => {
     const handleWindowFocus = async () => {
-      const handle = activeFileHandleRef.current;
-      if (!handle || !activeProjectId) return;
+      if (!activeProjectId) return;
       const prj = projects.find(p => p.id === activeProjectId);
-      if (!prj?.needsLinkPermission) return;
 
-      const perm = await checkFileHandlePermission(handle, 'read');
-      if (perm === 'granted') {
-        try {
-          const { payload, fileName } = await readFromProjectHandle(
-            handle,
-            activeProjectId,
-            `cat-${activeProjectId}-etc`,
-            { allowPromptRequest: false }
-          );
-          if (!hasUnsavedChanges && payload.items && payload.items.length > 0) {
-            setItems(prev => {
-              const otherItems = prev.filter(it => it.projectId !== activeProjectId);
-              return [...otherItems, ...payload.items];
-            });
+      // Check Equipment DB JSON handle
+      const handle = activeFileHandleRef.current;
+      if (handle && prj?.needsLinkPermission) {
+        const perm = await checkFileHandlePermission(handle, 'read');
+        if (perm === 'granted') {
+          try {
+            const { payload, fileName } = await readFromProjectHandle(
+              handle,
+              activeProjectId,
+              `cat-${activeProjectId}-etc`,
+              { allowPromptRequest: false }
+            );
+            if (!hasUnsavedChanges && payload.items && payload.items.length > 0) {
+              setItems(prev => {
+                const otherItems = prev.filter(it => it.projectId !== activeProjectId);
+                return [...otherItems, ...payload.items];
+              });
+            }
+            setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+              ...p,
+              linkedJsonFileName: fileName || p.linkedJsonFileName,
+              needsLinkPermission: false,
+              isLinkError: false,
+              linkErrorMessage: undefined,
+              linkedJsonLastSync: new Date().toLocaleTimeString('ja-JP')
+            } : p));
+          } catch {
+            // ignore silent focus check errors
           }
-          setProjects(prev => prev.map(p => p.id === activeProjectId ? {
-            ...p,
-            linkedJsonFileName: fileName || p.linkedJsonFileName,
-            needsLinkPermission: false,
-            isLinkError: false,
-            linkErrorMessage: undefined,
-            linkedJsonLastSync: new Date().toLocaleTimeString('ja-JP')
-          } : p));
-        } catch {
-          // ignore silent focus check errors
+        }
+      }
+
+      // Check Issuance Ledger JSON handle
+      const ledgerHandle = activeLedgerHandleRef.current;
+      if (ledgerHandle && prj?.needsLedgerPermission) {
+        const perm = await checkFileHandlePermission(ledgerHandle, 'read');
+        if (perm === 'granted') {
+          try {
+            const { ledger, fileName } = await readLedgerFromHandle(
+              ledgerHandle,
+              activeProjectId,
+              prj,
+              { allowPromptRequest: false }
+            );
+            setSpecLedgers(prev => ({
+              ...prev,
+              [activeProjectId]: ledger,
+            }));
+            setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+              ...p,
+              linkedLedgerFileName: fileName || p.linkedLedgerFileName,
+              needsLedgerPermission: false,
+              isLedgerLinkError: false,
+              ledgerErrorMessage: undefined,
+              linkedLedgerLastSync: new Date().toLocaleTimeString('ja-JP'),
+            } : p));
+          } catch {
+            // ignore silent focus check errors
+          }
         }
       }
     };
@@ -808,6 +981,374 @@ export default function App() {
     setHasUnsavedChanges(true);
   };
 
+  // ======================== Specification Issuance Ledger JSON Handlers ========================
+
+  // Create a brand new empty Issuance Ledger JSON file for a project ("無から作成")
+  const handleCreateNewLedgerFile = async (targetProjectId: string) => {
+    const prj = projects.find(p => p.id === targetProjectId) || currentProject;
+    const baseName = (prj?.orderNo || prj?.code || 'project').replace(/[\s/\\?%*:|"<>]/g, '_');
+    const suggestedName = `${baseName}_spec_ledger.json`;
+
+    const existingRecords = specLedgers[targetProjectId]?.records || [];
+    const initialLedger: SpecLedgerFile = {
+      ...createEmptyLedgerPayload(prj, targetProjectId),
+      records: existingRecords,
+    };
+
+    if (!('showSaveFilePicker' in window)) {
+      // Fallback download + in-memory initialization
+      const blob = new Blob([JSON.stringify(initialLedger, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = suggestedName;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setSpecLedgers(prev => ({ ...prev, [targetProjectId]: initialLedger }));
+      setProjects(prev => prev.map(p => p.id === targetProjectId ? {
+        ...p,
+        linkedLedgerFileName: suggestedName,
+        linkedLedgerLastSync: new Date().toLocaleTimeString('ja-JP'),
+        needsLedgerPermission: false,
+        isLedgerLinkError: false,
+        ledgerErrorMessage: undefined,
+      } : p));
+      setSyncNotice(`発行台帳JSON「${suggestedName}」を生成し、案件に紐づけました。`);
+      setTimeout(() => setSyncNotice(''), 5000);
+      return;
+    }
+
+    try {
+      const handle: FileSystemFileHandle = await (window as any).showSaveFilePicker({
+        suggestedName,
+        types: [
+          {
+            description: '仕様書発行台帳 JSON File',
+            accept: { 'application/json': ['.json'] },
+          },
+        ],
+      });
+
+      setIsLedgerSyncing(true);
+      await writeLedgerToHandle(handle, initialLedger, { allowPromptRequest: true });
+      await saveLedgerHandleForProject(targetProjectId, handle);
+      if (targetProjectId === activeProjectId) {
+        activeLedgerHandleRef.current = handle;
+      }
+
+      const nowStr = new Date().toLocaleTimeString('ja-JP');
+      setSpecLedgers(prev => ({ ...prev, [targetProjectId]: initialLedger }));
+      setProjects(prev => prev.map(p => p.id === targetProjectId ? {
+        ...p,
+        linkedLedgerFileName: handle.name || suggestedName,
+        linkedLedgerLastSync: nowStr,
+        needsLedgerPermission: false,
+        isLedgerLinkError: false,
+        ledgerErrorMessage: undefined,
+      } : p));
+
+      setSyncNotice(`発行台帳JSON「${handle.name || suggestedName}」を新規作成して案件と紐づけました。`);
+      setTimeout(() => setSyncNotice(''), 6000);
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        alert(`発行台帳JSONの作成に失敗しました: ${err.message || 'エラーが発生しました'}`);
+      }
+    } finally {
+      setIsLedgerSyncing(false);
+    }
+  };
+
+  // Link/Relink an existing Issuance Ledger JSON file
+  const handleRelinkLedgerFile = async (targetProjectId: string) => {
+    if (!('showOpenFilePicker' in window)) {
+      alert('お使いのブラウザはFile System Access APIに対応していません。Google ChromeまたはMicrosoft Edgeをご利用ください。');
+      return;
+    }
+
+    try {
+      const [handle] = await (window as any).showOpenFilePicker({
+        types: [
+          {
+            description: '仕様書発行台帳 JSON File',
+            accept: { 'application/json': ['.json'] },
+          },
+        ],
+        multiple: false,
+      });
+
+      if (!handle) return;
+      setIsLedgerSyncing(true);
+
+      await saveLedgerHandleForProject(targetProjectId, handle);
+      if (targetProjectId === activeProjectId) {
+        activeLedgerHandleRef.current = handle;
+      }
+
+      const prj = projects.find(p => p.id === targetProjectId);
+      const { ledger, fileName } = await readLedgerFromHandle(handle, targetProjectId, prj, {
+        allowPromptRequest: true,
+      });
+
+      const nowStr = new Date().toLocaleTimeString('ja-JP');
+      setSpecLedgers(prev => ({ ...prev, [targetProjectId]: ledger }));
+      setProjects(prev => prev.map(p => p.id === targetProjectId ? {
+        ...p,
+        linkedLedgerFileName: fileName,
+        linkedLedgerLastSync: nowStr,
+        needsLedgerPermission: false,
+        isLedgerLinkError: false,
+        ledgerErrorMessage: undefined,
+      } : p));
+
+      setSyncNotice(`発行台帳JSON「${fileName}」を案件と紐づけました（登録台帳 ${ledger.records.length} 件）。`);
+      setTimeout(() => setSyncNotice(''), 6000);
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        alert(`発行台帳JSONの紐づけに失敗しました: ${err.message || '形式をご確認ください'}`);
+      }
+    } finally {
+      setIsLedgerSyncing(false);
+    }
+  };
+
+  // 1-click reconnect for Issuance Ledger JSON handle
+  const handleReconnectLedgerFile = useCallback(async (targetProjectId: string) => {
+    setIsLedgerSyncing(true);
+    try {
+      let handle = targetProjectId === activeProjectId ? activeLedgerHandleRef.current : null;
+      if (!handle) {
+        handle = await getSavedLedgerHandleForProject(targetProjectId);
+        if (targetProjectId === activeProjectId) {
+          activeLedgerHandleRef.current = handle;
+        }
+      }
+
+      if (!handle) {
+        setIsLedgerSyncing(false);
+        await handleRelinkLedgerFile(targetProjectId);
+        return;
+      }
+
+      const perm = await requestFileHandlePermission(handle, 'readwrite').catch(async () => {
+        return await requestFileHandlePermission(handle, 'read');
+      });
+
+      if (perm !== 'granted') {
+        setSyncNotice('発行台帳JSONへのアクセスが許可されませんでした。');
+        setTimeout(() => setSyncNotice(''), 5000);
+        return;
+      }
+
+      const prj = projects.find(p => p.id === targetProjectId);
+      const { ledger, fileName } = await readLedgerFromHandle(handle, targetProjectId, prj, {
+        allowPromptRequest: false,
+      });
+
+      const nowStr = new Date().toLocaleTimeString('ja-JP');
+      setSpecLedgers(prev => ({ ...prev, [targetProjectId]: ledger }));
+      setProjects(prev => prev.map(p => p.id === targetProjectId ? {
+        ...p,
+        linkedLedgerFileName: fileName,
+        linkedLedgerLastSync: nowStr,
+        needsLedgerPermission: false,
+        isLedgerLinkError: false,
+        ledgerErrorMessage: undefined,
+      } : p));
+
+      setSyncNotice(`発行台帳JSON「${fileName}」との連動を再開しました (${nowStr})`);
+      setTimeout(() => setSyncNotice(''), 5000);
+    } catch (err: any) {
+      if (err instanceof FileMissingError || err.name === 'NotFoundError') {
+        setProjects(prev => prev.map(p => p.id === targetProjectId ? {
+          ...p,
+          needsLedgerPermission: false,
+          isLedgerLinkError: true,
+          ledgerErrorMessage: err.message || '紐づけ元の発行台帳JSONファイルが見つかりません。',
+        } : p));
+      } else if (!(err instanceof PermissionRequiredError)) {
+        alert(`発行台帳JSONの再接続に失敗しました: ${err.message || 'エラーが発生しました'}`);
+      }
+    } finally {
+      setIsLedgerSyncing(false);
+    }
+  }, [activeProjectId, projects]);
+
+  // Manual re-sync of Issuance Ledger JSON from disk
+  const handleSyncLedgerFile = useCallback(async (targetProjectId: string) => {
+    setIsLedgerSyncing(true);
+    try {
+      let handle = targetProjectId === activeProjectId ? activeLedgerHandleRef.current : null;
+      if (!handle) {
+        handle = await getSavedLedgerHandleForProject(targetProjectId);
+        if (targetProjectId === activeProjectId) {
+          activeLedgerHandleRef.current = handle;
+        }
+      }
+      if (!handle) {
+        throw new FileMissingError('発行台帳JSONファイルの参照が存在しません。ファイルを指定してください。');
+      }
+
+      const prj = projects.find(p => p.id === targetProjectId);
+      const { ledger, fileName } = await readLedgerFromHandle(handle, targetProjectId, prj, {
+        allowPromptRequest: true,
+      });
+
+      const nowStr = new Date().toLocaleTimeString('ja-JP');
+      setSpecLedgers(prev => ({ ...prev, [targetProjectId]: ledger }));
+      setProjects(prev => prev.map(p => p.id === targetProjectId ? {
+        ...p,
+        linkedLedgerFileName: fileName,
+        linkedLedgerLastSync: nowStr,
+        needsLedgerPermission: false,
+        isLedgerLinkError: false,
+        ledgerErrorMessage: undefined,
+      } : p));
+
+      setSyncNotice(`発行台帳JSON「${fileName}」から最新台帳 (${ledger.records.length}件) を同期しました (${nowStr})`);
+      setTimeout(() => setSyncNotice(''), 5000);
+    } catch (err: any) {
+      if (err instanceof PermissionRequiredError) {
+        setProjects(prev => prev.map(p => p.id === targetProjectId ? {
+          ...p,
+          needsLedgerPermission: true,
+          isLedgerLinkError: false,
+          ledgerErrorMessage: undefined,
+        } : p));
+      } else {
+        setProjects(prev => prev.map(p => p.id === targetProjectId ? {
+          ...p,
+          needsLedgerPermission: false,
+          isLedgerLinkError: true,
+          ledgerErrorMessage: err.message || '発行台帳JSONの読み込みに失敗しました。',
+        } : p));
+      }
+    } finally {
+      setIsLedgerSyncing(false);
+    }
+  }, [activeProjectId, projects]);
+
+  // Export download copy of Issuance Ledger JSON
+  const handleExportLedgerJson = (targetProjectId: string) => {
+    const prj = projects.find(p => p.id === targetProjectId);
+    const baseName = (prj?.orderNo || prj?.code || 'project').replace(/[\s/\\?%*:|"<>]/g, '_');
+    const currentLedger = specLedgers[targetProjectId]
+      ? normalizeLedgerJson(specLedgers[targetProjectId], targetProjectId, prj)
+      : createEmptyLedgerPayload(prj, targetProjectId);
+
+    const blob = new Blob([JSON.stringify(currentLedger, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${baseName}_spec_ledger.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Confirm specification issuance: upsert snapshot record into SpecLedgerFile and persist to disk if linked
+  const handleConfirmSpecIssuance = async (
+    record: SpecIssuanceRecord
+  ): Promise<{ savedToDisk: boolean; needsPermission?: boolean }> => {
+    const targetProjectId = record.projectId || activeProjectId;
+    const prj = projects.find(p => p.id === targetProjectId) || currentProject;
+    const baseLedger = specLedgers[targetProjectId]
+      ? normalizeLedgerJson(specLedgers[targetProjectId], targetProjectId, prj)
+      : createEmptyLedgerPayload(prj, targetProjectId);
+
+    const remaining = baseLedger.records.filter(r => r.id !== record.id);
+    const nextLedger: SpecLedgerFile = {
+      ...baseLedger,
+      projectOrderNo: prj?.orderNo || baseLedger.projectOrderNo,
+      projectCode: prj?.code || baseLedger.projectCode,
+      projectName: prj?.name || baseLedger.projectName,
+      lastUpdated: new Date().toISOString(),
+      records: [record, ...remaining],
+    };
+
+    setSpecLedgers(prev => ({
+      ...prev,
+      [targetProjectId]: nextLedger,
+    }));
+
+    let handle = targetProjectId === activeProjectId ? activeLedgerHandleRef.current : null;
+    if (!handle) {
+      handle = await getSavedLedgerHandleForProject(targetProjectId);
+      if (targetProjectId === activeProjectId) {
+        activeLedgerHandleRef.current = handle;
+      }
+    }
+
+    if (!handle) {
+      return { savedToDisk: false };
+    }
+
+    try {
+      await writeLedgerToHandle(handle, nextLedger, { allowPromptRequest: true });
+      const nowStr = new Date().toLocaleTimeString('ja-JP');
+      setProjects(prev => prev.map(p => p.id === targetProjectId ? {
+        ...p,
+        linkedLedgerFileName: handle?.name || p.linkedLedgerFileName,
+        linkedLedgerLastSync: nowStr,
+        needsLedgerPermission: false,
+        isLedgerLinkError: false,
+        ledgerErrorMessage: undefined,
+      } : p));
+      return { savedToDisk: true };
+    } catch (err: any) {
+      if (err instanceof PermissionRequiredError) {
+        setProjects(prev => prev.map(p => p.id === targetProjectId ? {
+          ...p,
+          needsLedgerPermission: true,
+          isLedgerLinkError: false,
+          ledgerErrorMessage: undefined,
+        } : p));
+        return { savedToDisk: false, needsPermission: true };
+      }
+      setProjects(prev => prev.map(p => p.id === targetProjectId ? {
+        ...p,
+        needsLedgerPermission: false,
+        isLedgerLinkError: true,
+        ledgerErrorMessage: err.message || '発行台帳JSONへの書き込みに失敗しました。',
+      } : p));
+      return { savedToDisk: false };
+    }
+  };
+
+  // Delete an issuance record from the active project's ledger
+  const handleDeleteLedgerRecord = async (recordId: string) => {
+    const targetProjectId = activeProjectId;
+    const prj = projects.find(p => p.id === targetProjectId) || currentProject;
+    const baseLedger = specLedgers[targetProjectId];
+    if (!baseLedger) return;
+
+    const nextLedger: SpecLedgerFile = {
+      ...baseLedger,
+      lastUpdated: new Date().toISOString(),
+      records: baseLedger.records.filter(r => r.id !== recordId),
+    };
+
+    setSpecLedgers(prev => ({
+      ...prev,
+      [targetProjectId]: nextLedger,
+    }));
+
+    const handle = activeLedgerHandleRef.current || await getSavedLedgerHandleForProject(targetProjectId);
+    if (handle) {
+      try {
+        await writeLedgerToHandle(handle, nextLedger, { allowPromptRequest: true });
+        setProjects(prev => prev.map(p => p.id === targetProjectId ? {
+          ...p,
+          linkedLedgerLastSync: new Date().toLocaleTimeString('ja-JP'),
+          needsLedgerPermission: false,
+          isLedgerLinkError: false,
+          ledgerErrorMessage: undefined,
+        } : p));
+      } catch (err) {
+        console.warn('Failed to persist deleted ledger record to disk', err);
+      }
+    }
+  };
+
   // Delete project registration from UI state & browser storage only (NEVER touch or delete the JSON file on disk!)
   const handleDeleteProjectRegistration = async (projectId: string) => {
     const targetProject = projects.find(p => p.id === projectId);
@@ -836,16 +1377,23 @@ export default function App() {
     }
 
     setProjects(remainingProjects);
-    localStorage.setItem('specforge_projects_v2', JSON.stringify(remainingProjects));
+    localStorage.setItem('specforge_projects_v2', JSON.stringify(sanitizeProjectsForStorage(remainingProjects)));
 
-    // 2. Remove in-memory items and categories associated with this project
+    // 2. Remove in-memory items, categories, and ledger state associated with this project
     setItems(prev => prev.filter(it => it.projectId !== projectId));
     setCategories(prev => prev.filter(c => c.projectId !== projectId));
+    setSpecLedgers(prev => {
+      const next = { ...prev };
+      delete next[projectId];
+      return next;
+    });
 
-    // 3. Remove handle from browser IndexedDB only (does NOT delete or touch the JSON file on the user's PC!)
+    // 3. Remove handles from browser IndexedDB only (does NOT delete or touch the JSON files on the user's PC!)
     await removeSavedFileHandleForProject(projectId);
+    await removeSavedLedgerHandleForProject(projectId);
     if (activeProjectId === projectId) {
       activeFileHandleRef.current = null;
+      activeLedgerHandleRef.current = null;
     }
 
     setActiveProjectId(nextActiveId);
@@ -1380,11 +1928,12 @@ export default function App() {
       {/* Streamlined Header */}
       <Header
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={handleTabChange}
         projects={projects}
         activeProjectId={activeProjectId}
         onProjectChange={handleRequestProjectChange}
         totalItemsCount={items.filter(i => i.projectId === activeProjectId).length}
+        ledgerRecordsCount={activeLedgerRecords.length}
         isSyncing={isSyncing}
         onManualSync={() => performSyncProject(activeProjectId, false)}
         onRelinkFile={() => handleRelinkProjectFile(activeProjectId)}
@@ -1523,14 +2072,42 @@ export default function App() {
           />
         )}
 
-        {/* Tab 2: Specification Studio & Live Preview */}
-        {activeTab === 'spec_studio' && (
+        {/* Tab 2A: Initial Specification Creation */}
+        {activeTab === 'spec_initial' && (
           <SpecDashboardTab
+            key={`spec_initial_${activeProjectId}`}
+            mode="initial"
             items={items}
             categories={projectCategories}
             templates={templates}
             activeProjectId={activeProjectId}
             currentProject={currentProject}
+            ledgerRecords={activeLedgerRecords}
+            onConfirmIssuance={handleConfirmSpecIssuance}
+            onCreateNewLedgerFile={handleCreateNewLedgerFile}
+            onRelinkLedgerFile={handleRelinkLedgerFile}
+            onReconnectLedgerFile={handleReconnectLedgerFile}
+            onOpenAdminMapping={() => setActiveTab('templates')}
+            onUpdateTemplates={setTemplates}
+          />
+        )}
+
+        {/* Tab 2B: Specification Revision (Rev.1〜3) */}
+        {activeTab === 'spec_revision' && (
+          <SpecDashboardTab
+            key={`spec_revision_${activeProjectId}`}
+            mode="revision"
+            items={items}
+            categories={projectCategories}
+            templates={templates}
+            activeProjectId={activeProjectId}
+            currentProject={currentProject}
+            ledgerRecords={activeLedgerRecords}
+            onConfirmIssuance={handleConfirmSpecIssuance}
+            onDeleteLedgerRecord={handleDeleteLedgerRecord}
+            onCreateNewLedgerFile={handleCreateNewLedgerFile}
+            onRelinkLedgerFile={handleRelinkLedgerFile}
+            onReconnectLedgerFile={handleReconnectLedgerFile}
             onOpenAdminMapping={() => setActiveTab('templates')}
             onUpdateTemplates={setTemplates}
           />
@@ -1543,7 +2120,7 @@ export default function App() {
             onUpdateTemplates={setTemplates}
             items={items}
             currentProject={currentProject}
-            onBackToDashboard={() => setActiveTab('spec_studio')}
+            onBackToDashboard={() => setActiveTab(lastSpecTab)}
           />
         )}
 
@@ -1566,6 +2143,14 @@ export default function App() {
             isSyncing={isSyncing}
             onInstallPwa={handleInstallPwa}
             onDeleteProject={handleDeleteProjectRegistration}
+            ledgerRecordsCount={activeLedgerRecords.length}
+            isLedgerSyncing={isLedgerSyncing}
+            onCreateNewLedgerFile={handleCreateNewLedgerFile}
+            onRelinkLedgerFile={handleRelinkLedgerFile}
+            onReconnectLedgerFile={handleReconnectLedgerFile}
+            onSyncLedgerFile={handleSyncLedgerFile}
+            onExportLedgerJson={handleExportLedgerJson}
+            onSwitchToRevisionTab={() => handleTabChange('spec_revision')}
           />
         )}
 
