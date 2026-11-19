@@ -484,11 +484,6 @@ export async function fillSpecificationExcel(
           ? (field.checkboxConfig?.checkedValue || '☑ 要')
           : (field.checkboxConfig?.uncheckedValue || '☐ 不要');
         cell.value = outputText;
-
-        if (field.labelCell && field.label) {
-          const lCell = worksheet.getCell(field.labelCell.trim().toUpperCase());
-          lCell.value = field.label;
-        }
       } else if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
         cell.value = String(rawVal);
       } else if (field.group === 'detail') {
@@ -789,6 +784,88 @@ interface MergeRangeInfo {
 }
 
 /**
+ * Safely extracts plain display text from an ExcelJS cell (including merged cells,
+ * richText, formula results, hyperlinks, and primitives).
+ */
+export function extractCellDisplayText(cell: ExcelJS.Cell | undefined | null): string {
+  if (!cell) return '';
+  const target: any = (cell as any).master || cell;
+  const val = target?.value;
+  if (val === null || val === undefined) return '';
+  if (typeof val === 'object') {
+    if ('result' in val && val.result !== undefined && val.result !== null) {
+      return String(val.result).trim();
+    }
+    if ('richText' in val && Array.isArray(val.richText)) {
+      return val.richText.map((t: any) => t?.text || '').join('').trim();
+    }
+    if ('text' in val && val.text !== undefined && val.text !== null) {
+      return String(val.text).trim();
+    }
+    if (val instanceof Date) {
+      return val.toISOString().slice(0, 10);
+    }
+    return String(val).trim();
+  }
+  return String(val).trim();
+}
+
+/**
+ * Reads the static text written in specific cell addresses of a SpecTemplate's Excel workbook.
+ * Used to reference checkbox item labels directly from Excel cells instead of manual typing.
+ */
+export async function readTemplateCellTexts(
+  template: SpecTemplate,
+  addresses: string[],
+  targetSheetOverride?: string
+): Promise<Record<string, string>> {
+  const uniqueAddrs = Array.from(
+    new Set(
+      addresses
+        .map((a) => (a || '').trim().toUpperCase())
+        .filter((a) => /^[A-Z]{1,3}[0-9]{1,5}$/.test(a))
+    )
+  );
+  if (uniqueAddrs.length === 0) return {};
+
+  const workbook = new ExcelJS.Workbook();
+  const rawBase64 = template.rawWorkbookBase64 || template.masterWorkbookBase64;
+  if (rawBase64) {
+    try {
+      const binary = atob(rawBase64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      await workbook.xlsx.load(bytes.buffer.slice(0));
+    } catch {
+      const defaultBuffer = await createDefaultMasterWorkbook(template);
+      await workbook.xlsx.load(defaultBuffer);
+    }
+  } else {
+    const defaultBuffer = await createDefaultMasterWorkbook(template);
+    await workbook.xlsx.load(defaultBuffer);
+  }
+
+  const worksheet = targetSheetOverride
+    ? workbook.getWorksheet(targetSheetOverride) || workbook.worksheets[0]
+    : workbook.worksheets[0];
+
+  if (!worksheet) return {};
+
+  const result: Record<string, string> = {};
+  for (const addr of uniqueAddrs) {
+    try {
+      const text = extractCellDisplayText(worksheet.getCell(addr));
+      result[addr] = text;
+    } catch {
+      result[addr] = '';
+    }
+  }
+  return result;
+}
+
+/**
  * Real-time In-Memory Excel Renderer:
  * Evaluates template updates in memory using ExcelJS on every keystroke/change,
  * analyzes cell matrices, merges, styles, and values, and returns grid representation with benchmark time.
@@ -863,7 +940,12 @@ export async function renderSpecificationExcelGrid(
     if (field.group === 'revision') continue;
     if (field.cell && field.cell.trim()) {
       const cleanAddr = field.cell.trim().toUpperCase();
-      fieldMappingMap[cleanAddr] = { id: field.id, label: field.label };
+      let effectiveLabel = field.label;
+      if (field.type === 'checkbox' && field.labelCell && /^[A-Z]{1,3}[0-9]{1,5}$/.test(field.labelCell.trim().toUpperCase())) {
+        const refText = extractCellDisplayText(worksheet.getCell(field.labelCell.trim().toUpperCase()));
+        if (refText) effectiveLabel = refText;
+      }
+      fieldMappingMap[cleanAddr] = { id: field.id, label: effectiveLabel };
 
       const cell = worksheet.getCell(cleanAddr);
       const rawVal = formValues[field.id];
@@ -872,10 +954,6 @@ export async function renderSpecificationExcelGrid(
         cell.value = isChecked
           ? (field.checkboxConfig?.checkedValue || '☑ 要')
           : (field.checkboxConfig?.uncheckedValue || '☐ 不要');
-        if (field.labelCell && field.label) {
-          const lCell = worksheet.getCell(field.labelCell.trim().toUpperCase());
-          lCell.value = field.label;
-        }
       } else if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
         cell.value = String(rawVal);
       } else if (field.group === 'detail') {

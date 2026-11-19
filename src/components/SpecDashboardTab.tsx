@@ -40,6 +40,7 @@ import {
 import {
   downloadSpecificationExcel,
   renderSpecificationExcelGrid,
+  readTemplateCellTexts,
   computeResolvedCellValues,
   diffResolvedCellValues,
   RenderedSheetGrid,
@@ -777,13 +778,60 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
     return null;
   }, [excelGridData, selectedCellAddress]);
 
+  const [checkboxLabelMap, setCheckboxLabelMap] = useState<Record<string, string>>({});
+
+  const checkboxLabelAddrsKey = useMemo(() => {
+    return (activeTemplate?.fields || [])
+      .filter((f) => f.type === 'checkbox' || f.group === 'check')
+      .map((f) => (f.labelCell || '').trim().toUpperCase())
+      .filter(Boolean)
+      .join(',');
+  }, [activeTemplate]);
+
+  useEffect(() => {
+    if (!activeTemplate || !checkboxLabelAddrsKey) {
+      setCheckboxLabelMap({});
+      return;
+    }
+    let isCancelled = false;
+    const addrs = checkboxLabelAddrsKey.split(',').filter(Boolean);
+    readTemplateCellTexts(activeTemplate, addrs, selectedSheetOverride || undefined)
+      .then((map) => {
+        if (!isCancelled) setCheckboxLabelMap(map);
+      })
+      .catch(() => {
+        if (!isCancelled) setCheckboxLabelMap({});
+      });
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeTemplate, checkboxLabelAddrsKey, selectedSheetOverride]);
+
+  const resolveCheckboxLabel = useCallback(
+    (field: SpecFieldMapping): string => {
+      const refAddr = (field.labelCell || '').trim().toUpperCase();
+      if (refAddr) {
+        if (cellOverrides[refAddr] !== undefined && cellOverrides[refAddr].trim() !== '') {
+          return cellOverrides[refAddr].trim();
+        }
+        if (checkboxLabelMap[refAddr]) {
+          return checkboxLabelMap[refAddr];
+        }
+        return field.label || `セル ${refAddr}`;
+      }
+      return field.label || `チェック項目 (${field.cell || '-'})`;
+    },
+    [cellOverrides, checkboxLabelMap]
+  );
+
   const selectedCellMappingInfo = useMemo(() => {
     if (!selectedCell || !activeTemplate?.fields) return null;
     const addr = selectedCell.address.trim().toUpperCase();
     for (const f of activeTemplate.fields) {
       if (f.group === 'revision') continue;
       if (f.cell && f.cell.trim().toUpperCase() === addr) {
-        return { field: f, formKey: f.id, label: f.label };
+        const label = f.type === 'checkbox' || f.group === 'check' ? resolveCheckboxLabel(f) : f.label;
+        return { field: f, formKey: f.id, label };
       }
       if (f.cellSlot2 && f.cellSlot2.trim().toUpperCase() === addr) {
         return { field: f, formKey: `${f.id}__slot2`, label: `${f.label} (2種類目)` };
@@ -796,7 +844,7 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
       }
     }
     return null;
-  }, [selectedCell, activeTemplate]);
+  }, [selectedCell, activeTemplate, resolveCheckboxLabel]);
 
   const selectedCellMappedField = selectedCellMappingInfo?.field || null;
 
@@ -2215,6 +2263,8 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                   const isChecked = Boolean(formValues[field.id]);
                   const cfg = field.checkboxConfig;
                   const isSelected = focusedFieldId === field.id || selectedCellMappedField?.id === field.id;
+                  const displayLabel = resolveCheckboxLabel(field);
+                  const refAddr = (field.labelCell || '').trim().toUpperCase();
                   return (
                     <div
                       key={field.id}
@@ -2235,17 +2285,28 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                         {isChecked ? <CheckSquare className="w-4 h-4 text-indigo-600" /> : <Square className="w-4 h-4 text-slate-400" />}
                       </button>
                       <div className="flex-1 min-w-0">
-                        <div className="text-xs font-semibold text-slate-900 flex items-center justify-between">
-                          <span className="flex items-center gap-1">
-                            <span>{field.label}</span>
+                        <div className="text-xs font-semibold text-slate-900 flex items-center justify-between gap-2">
+                          <span className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                            <span className="truncate">{displayLabel}</span>
+                            {refAddr && (
+                              <span
+                                className="font-mono text-[9px] bg-indigo-50 text-indigo-700 border border-indigo-200 px-1 py-0.2 rounded shrink-0"
+                                title={`項目名の参照セル: ${refAddr}`}
+                              >
+                                参照:{refAddr}
+                              </span>
+                            )}
                             {field.cell && (
-                              <span className="font-mono text-[9px] bg-slate-200 text-slate-700 px-1 py-0.5 rounded">
+                              <span
+                                className="font-mono text-[9px] bg-slate-200 text-slate-700 px-1 py-0.2 rounded shrink-0"
+                                title={`チェック出力セル: ${field.cell}`}
+                              >
                                 {field.cell}
                               </span>
                             )}
                           </span>
                           <span
-                            className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                            className={`text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0 whitespace-nowrap ${
                               isChecked ? 'bg-indigo-100 text-indigo-800 font-bold' : 'bg-slate-200 text-slate-500'
                             }`}
                           >

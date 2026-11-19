@@ -21,7 +21,7 @@ import {
   FolderSync
 } from 'lucide-react';
 import { SpecTemplate, SpecFieldMapping, SpecMappingAssetFile, EquipmentItem, ProjectWorkspace, TemplateFolderState } from '../types';
-import { exportMappingAssetAsJson, importMappingAssetFromJson, createDefaultMasterWorkbook } from '../utils/exceljsEngine';
+import { exportMappingAssetAsJson, importMappingAssetFromJson, readTemplateCellTexts } from '../utils/exceljsEngine';
 import { normalizeSpecTemplate, REVISION_FIELD_DEFS } from '../utils/templateUtils';
 
 interface TemplateAdminTabProps {
@@ -66,7 +66,6 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [templateFilter, setTemplateFilter] = useState<string>('');
 
-  const excelInputRef = useRef<HTMLInputElement | null>(null);
   const jsonAssetInputRef = useRef<HTMLInputElement | null>(null);
   const folderFallbackInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -131,10 +130,21 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
   // Save template modifications (and write paired .specmap.json into registered folder when applicable)
   const handleSaveEdit = async () => {
     if (!editingTemplate) return;
-    const cleanName = editingTemplate.name.trim() || '無題のテンプレート';
+    const syncedFields = (editingTemplate.fields || []).map((f) => {
+      if (f.type === 'checkbox' || f.group === 'check') {
+        const refAddr = (f.labelCell || '').trim().toUpperCase();
+        const refText = refAddr ? excelLabelPreviewMap[refAddr] : '';
+        return {
+          ...f,
+          labelCell: refAddr,
+          label: refText || f.label || (refAddr ? `セル ${refAddr}` : ''),
+        };
+      }
+      return f;
+    });
     const cleanedTpl = normalizeSpecTemplate({
       ...editingTemplate,
-      name: cleanName,
+      fields: syncedFields,
       updatedAt: new Date().toISOString().slice(0, 10)
     });
     const updated = templates.map(t => t.id === cleanedTpl.id ? cleanedTpl : t);
@@ -218,7 +228,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
       notesTemplate: '特記事項なし。',
       sourceType: 'custom_excel',
       fields: [
-        { id: `f-${Date.now()}-3`, label: '耐圧検査成績書提出', cell: 'C8', type: 'checkbox', group: 'check', defaultValue: true, checkboxConfig: { checkedValue: '☑ 要', uncheckedValue: '☐ 不要', labelTrue: '要', labelFalse: '不要' } },
+        { id: `f-${Date.now()}-3`, label: '', cell: 'C8', labelCell: 'B8', type: 'checkbox', group: 'check', defaultValue: true, checkboxConfig: { checkedValue: '☑ 要', uncheckedValue: '☐ 不要', labelTrue: '要', labelFalse: '不要' } },
         { id: `f-${Date.now()}-4`, label: '塗装仕様', cell: 'C9', type: 'select', group: 'spec', options: ['標準防錆塗装', 'エポキシ樹脂塗装', '無塗装'], defaultValue: '標準防錆塗装' },
         { id: `f-${Date.now()}-5`, label: '特記事項', cell: 'B23', type: 'textarea', group: 'notes', defaultValue: '特記事項なし。' }
       ],
@@ -263,58 +273,6 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
     setDeleteTargetTpl(null);
     setMessage(`テンプレート「${deletedName}」を削除しました。`);
     setTimeout(() => setMessage(''), 4000);
-  };
-
-  // Upload Master Excel Template (.xlsx)
-  const handleUploadMasterExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const buffer = evt.target?.result as ArrayBuffer;
-        const bytes = new Uint8Array(buffer);
-        let binary = '';
-        for (let i = 0; i < bytes.byteLength; i++) {
-          binary += String.fromCharCode(bytes[i]);
-        }
-        const base64 = btoa(binary);
-
-        const targetId = editingTemplate ? editingTemplate.id : selectedTemplateId;
-        const updated = templates.map(t => {
-          if (t.id === targetId) {
-            return {
-              ...(editingTemplate && editingTemplate.id === t.id ? editingTemplate : t),
-              masterFileName: file.name,
-              masterWorkbookBase64: base64,
-              rawWorkbookBase64: base64,
-              updatedAt: new Date().toISOString().slice(0, 10)
-            };
-          }
-          return t;
-        });
-
-        onUpdateTemplates(updated);
-
-        if (editingTemplate) {
-          setEditingTemplate({
-            ...editingTemplate,
-            masterFileName: file.name,
-            masterWorkbookBase64: base64,
-            rawWorkbookBase64: base64,
-            updatedAt: new Date().toISOString().slice(0, 10)
-          });
-        }
-
-        setMessage(`マスター雛形Excel「${file.name}」を取り込み、設定を即時保存しました。直接描画ビューに反映されます。`);
-        setTimeout(() => setMessage(''), 5000);
-      } catch (err: any) {
-        setErrorMessage(`マスター雛形の読み込みに失敗しました: ${err.message}`);
-      }
-    };
-    reader.readAsArrayBuffer(file);
-    e.target.value = '';
   };
 
   // Export Mapping Definition Asset (JSON)
@@ -375,20 +333,6 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
     e.target.value = '';
   };
 
-  // Download Sample Master Excel
-  const handleDownloadSampleMaster = async (tpl: SpecTemplate) => {
-    const buffer = await createDefaultMasterWorkbook(tpl);
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `マスター雛形_${tpl.name}_E30セル対応.xlsx`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
   // Field manipulation helpers for editingTemplate
   const handleAddSpecField = () => {
     if (!editingTemplate) return;
@@ -415,9 +359,9 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
     if (!editingTemplate) return;
     const newField: SpecFieldMapping = {
       id: `f-check-${Date.now()}`,
-      label: '耐圧・漏れ検査',
-      cell: 'B8',
-      labelCell: 'C8',
+      label: '',
+      cell: 'C8',
+      labelCell: 'B8',
       type: 'checkbox',
       group: 'check',
       defaultValue: true,
@@ -467,6 +411,32 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
   const checkboxFields = React.useMemo(() => {
     return (activeTpl?.fields || []).filter(f => f.type === 'checkbox' || f.group === 'check');
   }, [activeTpl]);
+
+  const checkboxLabelAddrsKey = React.useMemo(
+    () => checkboxFields.map((f) => (f.labelCell || '').trim().toUpperCase()).filter(Boolean).join(','),
+    [checkboxFields]
+  );
+
+  const [excelLabelPreviewMap, setExcelLabelPreviewMap] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!activeTpl || !checkboxLabelAddrsKey) {
+      setExcelLabelPreviewMap({});
+      return;
+    }
+    let cancelled = false;
+    const addrs = checkboxLabelAddrsKey.split(',').filter(Boolean);
+    readTemplateCellTexts(activeTpl, addrs)
+      .then((map) => {
+        if (!cancelled) setExcelLabelPreviewMap(map);
+      })
+      .catch(() => {
+        if (!cancelled) setExcelLabelPreviewMap({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTpl?.id, activeTpl?.rawWorkbookBase64, activeTpl?.masterWorkbookBase64, checkboxLabelAddrsKey]);
 
   const basicFields = React.useMemo(() => {
     return (activeTpl?.fields || []).filter(f => f.group === 'basic');
@@ -765,29 +735,12 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
           <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
               <div className="flex-1 min-w-0">
-                {isEditing ? (
-                  <div className="space-y-1.5 max-w-xl">
-                    <input
-                      type="text"
-                      value={editingTemplate?.name ?? ''}
-                      onChange={(e) => setEditingTemplate(prev => prev ? { ...prev, name: e.target.value } : prev)}
-                      placeholder="仕様書のテンプレート名を入力..."
-                      className="w-full text-sm font-bold text-slate-900 bg-white border border-indigo-300 rounded-md px-2.5 py-1 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
-                    />
-                    <p className="text-xs text-slate-500 truncate">
-                      {activeTpl.description}
-                    </p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-slate-900">{activeTpl.name}</span>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1">
-                      {activeTpl.description}
-                    </p>
-                  </>
-                )}
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-slate-900 truncate">{activeTpl.name}</span>
+                </div>
+                <p className="text-xs text-slate-500 mt-1 truncate">
+                  {activeTpl.description}
+                </p>
               </div>
 
               <div className="flex items-center gap-2">
@@ -849,53 +802,6 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
               </div>
             </div>
 
-            {/* Master Template Excel File Status */}
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
-                  <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-                </div>
-                <div className="min-w-0">
-                  <div className="font-semibold text-slate-900 flex items-center gap-1.5 flex-wrap">
-                    <span>マスター雛形Excel:</span>
-                    <span className="font-mono text-emerald-700 truncate">
-                      {activeTpl.excelFileName || activeTpl.masterFileName || activeTpl.originalFileName || 'システム内蔵高品位マスター雛形 (ExcelJS)'}
-                    </span>
-                    {activeTpl.sourceLocation === 'folder' && (
-                      <span className="text-[11px] font-normal text-slate-500">
-                        · {activeTpl.mappingFileName ? `連携JSON: ${activeTpl.mappingFileName}` : '同名マッピングJSON未作成（既定マッピング）'}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[11px] text-slate-500">
-                    共有フォルダの原本は保護され、メモリ内で安全にコピー作成した上で値を流し込みます。
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <label className="px-3 py-1.5 text-xs font-medium text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-md transition-colors flex items-center gap-1 cursor-pointer shadow-2xs">
-                  <Upload className="w-3.5 h-3.5 text-emerald-700" />
-                  <span>雛形Excel差替</span>
-                  <input
-                    type="file"
-                    ref={excelInputRef}
-                    accept=".xlsx"
-                    onChange={handleUploadMasterExcel}
-                    className="hidden"
-                  />
-                </label>
-                <button
-                  onClick={() => handleDownloadSampleMaster(activeTpl)}
-                  className="px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-200 rounded-md transition-colors flex items-center gap-1 cursor-pointer"
-                  title="マスター雛形Excelをダウンロードして手元で書式を確認"
-                >
-                  <Download className="w-3.5 h-3.5 text-slate-500" />
-                  <span>雛形DL</span>
-                </button>
-              </div>
-            </div>
-
             {/* Sub Tabs */}
             <div className="flex border-b border-slate-200 pt-1 text-xs overflow-x-auto">
               <button
@@ -918,7 +824,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                 }`}
               >
                 <Layers className="w-3.5 h-3.5" />
-                <span>基本情報マッピング ({basicFields.length} + 履歴{revisionFields.length})</span>
+                <span>基本情報マッピング</span>
               </button>
               <button
                 onClick={() => setActiveTabSub('asset')}
@@ -1197,7 +1103,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                       <span>チェックボックス設定 (適用要件・指定基準) ({checkboxFields.length}項目)</span>
                     </h2>
                     <p className="text-[11px] text-slate-500">
-                      チェックボックス（☑ / ☐）を入れたいセル番地と、その項目名が記載されるセル番地をマッピングします。
+                      チェックボックス（☑ / ☐）を出力するセル番地と、項目名が記載されているExcelセル番地を指定します。作成画面では参照セルの文言がそのまま項目名として表示されます。
                     </p>
                   </div>
 
@@ -1217,25 +1123,41 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                     <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
                       <tr>
                         <th className="p-2 w-36">チェックボックスのセル番地</th>
-                        <th className="p-2 w-36">項目のセル番地</th>
-                        <th className="p-2 w-48">チェック項目名</th>
+                        <th className="p-2 w-40">チェック項目名のセル番地</th>
+                        <th className="p-2 w-52">参照項目名 (Excel記載内容)</th>
                         <th className="p-2">流し込み値 (ON / OFF)</th>
                         {isEditing && <th className="p-2 text-right w-14">操作</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {checkboxFields.map((field) => {
+                        const refAddr = (field.labelCell || '').trim().toUpperCase();
+                        const hasValidRefAddr = /^[A-Z]{1,3}[0-9]{1,5}$/.test(refAddr);
+                        const resolvedExcelText = hasValidRefAddr ? (excelLabelPreviewMap[refAddr] || '') : '';
+
                         if (!isEditing) {
                           return (
                             <tr key={field.id} className="hover:bg-slate-50/70">
                               <td className="p-2 font-mono font-bold text-emerald-700">
-                                {field.cell}
+                                {field.cell || '-'}
                               </td>
-                              <td className="p-2 font-mono text-slate-700">
-                                {field.labelCell || '-'}
+                              <td className="p-2 font-mono font-semibold text-indigo-700">
+                                {refAddr || '-'}
                               </td>
-                              <td className="p-2 font-semibold text-slate-900">
-                                {field.label}
+                              <td className="p-2 text-slate-900">
+                                {resolvedExcelText ? (
+                                  <span className="font-semibold">{resolvedExcelText}</span>
+                                ) : hasValidRefAddr ? (
+                                  <span className="text-[11px] text-slate-400">
+                                    (セル {refAddr} は空欄)
+                                  </span>
+                                ) : field.label ? (
+                                  <span className="text-slate-600">
+                                    {field.label} <span className="text-[10px] text-amber-600">(セル未指定)</span>
+                                  </span>
+                                ) : (
+                                  <span className="text-[11px] text-slate-400">未指定</span>
+                                )}
                               </td>
                               <td className="p-2 text-[11px] font-mono text-slate-600">
                                 ON: <span className="text-emerald-700 font-semibold">{field.checkboxConfig?.checkedValue || '☑ 要'}</span> / 
@@ -1253,7 +1175,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                                 value={field.cell}
                                 onChange={(e) => handleUpdateField(field.id, { cell: e.target.value.toUpperCase() })}
                                 className="w-full text-xs font-mono font-bold bg-white border border-emerald-300 rounded px-2 py-1 text-emerald-800"
-                                placeholder="B8, D8..."
+                                placeholder="例: C8"
                               />
                             </td>
                             <td className="p-2">
@@ -1261,18 +1183,20 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                                 type="text"
                                 value={field.labelCell || ''}
                                 onChange={(e) => handleUpdateField(field.id, { labelCell: e.target.value.toUpperCase() })}
-                                className="w-full text-xs font-mono bg-white border border-slate-300 rounded px-2 py-1 text-slate-800"
-                                placeholder="C8, E8..."
+                                className="w-full text-xs font-mono font-bold bg-white border border-indigo-300 rounded px-2 py-1 text-indigo-800"
+                                placeholder="例: B8"
                               />
                             </td>
                             <td className="p-2">
-                              <input
-                                type="text"
-                                value={field.label}
-                                onChange={(e) => handleUpdateField(field.id, { label: e.target.value })}
-                                className="w-full text-xs font-semibold bg-white border border-slate-300 rounded px-2 py-1 text-slate-900"
-                                placeholder="耐圧・漏れ検査"
-                              />
+                              <div className="text-xs px-2 py-1 rounded bg-slate-50 border border-slate-200 text-slate-700 truncate" title={resolvedExcelText || undefined}>
+                                {resolvedExcelText ? (
+                                  <span className="font-semibold text-slate-900">{resolvedExcelText}</span>
+                                ) : hasValidRefAddr ? (
+                                  <span className="text-[11px] text-slate-400">セル {refAddr} に記載なし</span>
+                                ) : (
+                                  <span className="text-[11px] text-slate-400">セル番地を入力すると自動参照</span>
+                                )}
+                              </div>
                             </td>
                             <td className="p-2">
                               <div className="grid grid-cols-2 gap-1.5 text-[11px]">
@@ -1333,7 +1257,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                   <div>
                     <h2 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
                       <Layers className="w-4 h-4 text-indigo-600" />
-                      <span>基本情報マッピング（固定5項目）</span>
+                      <span>基本情報マッピング</span>
                     </h2>
                     <p className="text-[11px] text-slate-500">
                       オーダーNo.・案件名・客先名・仕様書番号・発行日の5項目をExcel原本のどのセルへ書き込むか設定します。（項目は固定・セル番地のみ入力可）
