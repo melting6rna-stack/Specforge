@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   FileText,
   Download,
@@ -24,6 +24,10 @@ import {
   Sparkles,
   HardDrive,
   FolderOpen,
+  FlaskConical,
+  Unlink,
+  Undo2,
+  Save,
 } from 'lucide-react';
 import {
   EquipmentItem,
@@ -43,15 +47,24 @@ import {
   readTemplateCellTexts,
   computeResolvedCellValues,
   diffResolvedCellValues,
+  exportMappingAssetAsJson,
   RenderedSheetGrid,
   RenderedCellData,
   ExcelRevisionContext,
 } from '../utils/exceljsEngine';
 import { normalizeSpecTemplate, REVISION_FIELD_DEFS } from '../utils/templateUtils';
 import { formatEquipmentTagRangeTitle } from '../utils/ledgerSyncManager';
+import {
+  DragDropMode,
+  DraggableSpecChip,
+  applyChipDropToTemplate,
+  unmapCellFromTemplate,
+} from '../utils/specDragDropUtils';
+import { EquipmentSpecDragPalette } from './EquipmentSpecDragPalette';
 
 interface SpecDashboardTabProps {
   mode: 'initial' | 'revision';
+  enableDragDropMapping?: boolean;
   items: EquipmentItem[];
   categories: Category[];
   templates: SpecTemplate[];
@@ -67,6 +80,7 @@ interface SpecDashboardTabProps {
   onReconnectLedgerFile?: (projectId: string) => void;
   onOpenAdminMapping?: (templateId: string) => void;
   onUpdateTemplates?: (templates: SpecTemplate[]) => void;
+  onSaveMappingToFolder?: (template: SpecTemplate) => Promise<{ writtenToFolder: boolean; fileName: string }>;
 }
 
 const DEFAULT_REV_ENTRIES = (today: string, defaultAuthor: string): Record<1 | 2 | 3, RevisionHistoryEntry> => ({
@@ -84,6 +98,7 @@ function parseCellAddressTokens(raw: string): string[] {
 
 export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
   mode,
+  enableDragDropMapping = false,
   items,
   templates,
   activeProjectId,
@@ -97,6 +112,8 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
   onRelinkLedgerFile,
   onReconnectLedgerFile,
   onOpenAdminMapping,
+  onUpdateTemplates,
+  onSaveMappingToFolder,
 }) => {
   const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const projectItems = useMemo(
@@ -181,6 +198,29 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
   const [previewZoom, setPreviewZoom] = useState<number>(100);
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportNotice, setExportNotice] = useState<string>('');
+
+  // Drag & Drop Equipment Spec Mapping state (active only on Test Page)
+  const [dndMode, setDndMode] = useState<DragDropMode>('mapping');
+  const [draggingChip, setDraggingChip] = useState<DraggableSpecChip | null>(null);
+  const [dragOverCellAddress, setDragOverCellAddress] = useState<string | null>(null);
+  const [pendingDropConfirm, setPendingDropConfirm] = useState<{
+    chip: DraggableSpecChip;
+    cell: RenderedCellData;
+    mode: DragDropMode;
+  } | null>(null);
+  const [dndUndoStack, setDndUndoStack] = useState<
+    Array<{
+      template: SpecTemplate;
+      formValues: Record<string, any>;
+      cellOverrides: Record<string, string>;
+      overrideChipCells: Record<string, string[]>;
+      label: string;
+    }>
+  >([]);
+  const [hasUnsavedDndMapping, setHasUnsavedDndMapping] = useState<boolean>(false);
+  const [isSavingDndMapping, setIsSavingDndMapping] = useState<boolean>(false);
+  const [dndOverrideChipCells, setDndOverrideChipCells] = useState<Record<string, string[]>>({});
+  const skipNextTemplateResetRef = useRef<string | null>(null);
 
   // Ensure valid selection in Initial mode when projectItems changes
   useEffect(() => {
@@ -431,6 +471,10 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
   // Initialize form values in INITIAL mode when template or primary item changes
   useEffect(() => {
     if (mode !== 'initial' || !activeTemplate) return;
+    if (skipNextTemplateResetRef.current && skipNextTemplateResetRef.current === activeTemplate.id) {
+      skipNextTemplateResetRef.current = null;
+      return;
+    }
     const initialVals: Record<string, any> = {};
 
     const fields: SpecFieldMapping[] = activeTemplate.fields || [];
@@ -456,6 +500,17 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
     setFormValues(newVals);
     setTransferredFieldsMap(matchedMap);
   }, [mode, activeTemplate, primaryItem?.id, transferSpecsFromEquipment]);
+
+  // Reset D&D session state when switching to a different template
+  useEffect(() => {
+    if (!enableDragDropMapping) return;
+    setDndUndoStack([]);
+    setHasUnsavedDndMapping(false);
+    setDndOverrideChipCells({});
+    setPendingDropConfirm(null);
+    setDraggingChip(null);
+    setDragOverCellAddress(null);
+  }, [selectedTemplateId, enableDragDropMapping]);
 
   // Reset per-session UI state when project changes
   useEffect(() => {
@@ -1246,13 +1301,234 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
     [ledgerRecords, activeRecordId]
   );
 
+  // Drag & Drop Handlers (Test Page only)
+  const executeChipDrop = useCallback(
+    (chip: DraggableSpecChip, targetCellAddress: string, dropMode: DragDropMode) => {
+      if (!activeTemplate) return;
+      const cleanAddr = targetCellAddress.trim().toUpperCase();
+
+      // Record Undo snapshot
+      setDndUndoStack((prev) => [
+        ...prev.slice(-19),
+        {
+          template: JSON.parse(JSON.stringify(activeTemplate)),
+          formValues: { ...formValues },
+          cellOverrides: { ...cellOverrides },
+          overrideChipCells: JSON.parse(JSON.stringify(dndOverrideChipCells)),
+          label: `${cleanAddr} ← ${chip.label}`,
+        },
+      ]);
+
+      if (dropMode === 'mapping') {
+        const res = applyChipDropToTemplate(activeTemplate, chip, cleanAddr);
+        skipNextTemplateResetRef.current = activeTemplate.id;
+
+        if (onUpdateTemplates) {
+          onUpdateTemplates(
+            templates.map((t) => (t.id === activeTemplate.id ? res.updatedTemplate : t))
+          );
+        }
+
+        setFormValues((prev) => ({
+          ...prev,
+          [res.formKey]: chip.value,
+        }));
+
+        // Clear any stale one-time override on the target cell so the mapped value renders cleanly
+        setCellOverrides((prev) => {
+          if (prev[cleanAddr] === undefined) return prev;
+          const next = { ...prev };
+          delete next[cleanAddr];
+          return next;
+        });
+
+        setSelectedCellAddress(cleanAddr);
+        setFocusedFieldId(res.fieldId);
+        setHasUnsavedDndMapping(true);
+        setExportNotice(
+          `✅ セル ${cleanAddr} に「${chip.label}」をマッピング登録しました（${chip.value}）`
+        );
+        setTimeout(() => setExportNotice(''), 5000);
+      } else {
+        setCellOverrides((prev) => ({
+          ...prev,
+          [cleanAddr]: chip.value,
+        }));
+        setDndOverrideChipCells((prev) => {
+          const existing = prev[chip.chipKey] || [];
+          const nextList = existing.includes(cleanAddr) ? existing : [...existing, cleanAddr];
+          return { ...prev, [chip.chipKey]: nextList };
+        });
+        setSelectedCellAddress(cleanAddr);
+        setExportNotice(
+          `📌 セル ${cleanAddr} に「${chip.label}: ${chip.value}」を今回のみ貼り付けました`
+        );
+        setTimeout(() => setExportNotice(''), 5000);
+      }
+    },
+    [activeTemplate, formValues, cellOverrides, dndOverrideChipCells, onUpdateTemplates, templates]
+  );
+
+  const handleCellDrop = useCallback(
+    (e: React.DragEvent, cell: RenderedCellData) => {
+      if (!enableDragDropMapping) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      let chip: DraggableSpecChip | null = draggingChip;
+      if (!chip) {
+        try {
+          const raw = e.dataTransfer.getData('application/x-specforge-chip');
+          if (raw) chip = JSON.parse(raw);
+        } catch {
+          // ignore
+        }
+      }
+
+      setDraggingChip(null);
+      setDragOverCellAddress(null);
+      if (!chip) return;
+
+      const hasExistingContent =
+        (cell.value || '').trim() !== '' ||
+        Boolean(cell.isMapped || cell.mappedFieldId) ||
+        cellOverrides[cell.address] !== undefined;
+
+      if (hasExistingContent) {
+        setPendingDropConfirm({ chip, cell, mode: dndMode });
+      } else {
+        executeChipDrop(chip, cell.address, dndMode);
+      }
+    },
+    [enableDragDropMapping, draggingChip, cellOverrides, dndMode, executeChipDrop]
+  );
+
+  const handleUnmapSelectedCell = useCallback(() => {
+    if (!enableDragDropMapping || !activeTemplate || !selectedCellAddress) return;
+    const cleanAddr = selectedCellAddress.trim().toUpperCase();
+    const hadOverride = cellOverrides[cleanAddr] !== undefined;
+    const res = unmapCellFromTemplate(activeTemplate, cleanAddr);
+
+    if (!hadOverride && !res.removedLabel) return;
+
+    setDndUndoStack((prev) => [
+      ...prev.slice(-19),
+      {
+        template: JSON.parse(JSON.stringify(activeTemplate)),
+        formValues: { ...formValues },
+        cellOverrides: { ...cellOverrides },
+        overrideChipCells: JSON.parse(JSON.stringify(dndOverrideChipCells)),
+        label: `${cleanAddr} の解除`,
+      },
+    ]);
+
+    if (hadOverride) {
+      setCellOverrides((prev) => {
+        const next = { ...prev };
+        delete next[cleanAddr];
+        return next;
+      });
+      setDndOverrideChipCells((prev) => {
+        const next: Record<string, string[]> = {};
+        for (const [k, addrs] of Object.entries(prev)) {
+          const filtered = addrs.filter((a) => a !== cleanAddr);
+          if (filtered.length > 0) next[k] = filtered;
+        }
+        return next;
+      });
+    }
+
+    if (res.removedLabel && onUpdateTemplates) {
+      skipNextTemplateResetRef.current = activeTemplate.id;
+      onUpdateTemplates(
+        templates.map((t) => (t.id === activeTemplate.id ? res.updatedTemplate : t))
+      );
+      setHasUnsavedDndMapping(true);
+    }
+
+    setExportNotice(
+      res.removedLabel
+        ? `🔓 セル ${cleanAddr} のマッピング（${res.removedLabel}）を解除しました`
+        : `🔓 セル ${cleanAddr} の直接貼付を解除しました`
+    );
+    setTimeout(() => setExportNotice(''), 4000);
+  }, [
+    enableDragDropMapping,
+    activeTemplate,
+    selectedCellAddress,
+    cellOverrides,
+    formValues,
+    dndOverrideChipCells,
+    onUpdateTemplates,
+    templates,
+  ]);
+
+  const handleUndoDnd = useCallback(() => {
+    if (dndUndoStack.length === 0) return;
+    const last = dndUndoStack[dndUndoStack.length - 1];
+    setDndUndoStack((prev) => prev.slice(0, -1));
+
+    if (onUpdateTemplates) {
+      skipNextTemplateResetRef.current = last.template.id;
+      onUpdateTemplates(templates.map((t) => (t.id === last.template.id ? last.template : t)));
+    }
+    setFormValues(last.formValues);
+    setCellOverrides(last.cellOverrides);
+    setDndOverrideChipCells(last.overrideChipCells);
+    setExportNotice(`↩ 直前の操作を元に戻しました（${last.label}）`);
+    setTimeout(() => setExportNotice(''), 4000);
+  }, [dndUndoStack, onUpdateTemplates, templates]);
+
+  const handleSaveDndMappingToFolder = useCallback(async () => {
+    if (!activeTemplate) return;
+    if (!onSaveMappingToFolder) {
+      exportMappingAssetAsJson(activeTemplate);
+      setHasUnsavedDndMapping(false);
+      setExportNotice(`💾 マッピング定義JSONをダウンロードしました（${activeTemplate.name}）`);
+      setTimeout(() => setExportNotice(''), 5000);
+      return;
+    }
+    setIsSavingDndMapping(true);
+    try {
+      const res = await onSaveMappingToFolder(activeTemplate);
+      setHasUnsavedDndMapping(false);
+      if (res.writtenToFolder) {
+        setExportNotice(`✅ 参照元フォルダへ「${res.fileName}」を保存しました。次回から自動転記されます。`);
+      } else {
+        exportMappingAssetAsJson(activeTemplate);
+        setExportNotice(`💾 書き込み権限がないため「${res.fileName}」をダウンロードしました。参照元フォルダへ配置してください。`);
+      }
+      setTimeout(() => setExportNotice(''), 6000);
+    } catch (err: any) {
+      setExportNotice(`⚠️ マッピング保存に失敗しました: ${err?.message || 'エラー'}`);
+      setTimeout(() => setExportNotice(''), 6000);
+    } finally {
+      setIsSavingDndMapping(false);
+    }
+  }, [activeTemplate, onSaveMappingToFolder]);
+
+  const handleDownloadDndMappingJson = useCallback(() => {
+    if (!activeTemplate) return;
+    exportMappingAssetAsJson(activeTemplate);
+    setHasUnsavedDndMapping(false);
+    setExportNotice(`💾 マッピング定義JSON（.specmap.json）をダウンロードしました。`);
+    setTimeout(() => setExportNotice(''), 5000);
+  }, [activeTemplate]);
+
   return (
     <div className="space-y-4">
       {/* Top Mode Banner */}
-      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className={`bg-white border rounded-xl p-4 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+        enableDragDropMapping ? 'border-emerald-300 ring-1 ring-emerald-100' : 'border-slate-200'
+      }`}>
         <div>
           <div className="flex items-center gap-2 flex-wrap">
-            {mode === 'initial' ? (
+            {enableDragDropMapping ? (
+              <span className="text-[10px] font-bold bg-emerald-700 text-white px-2 py-0.5 rounded font-mono inline-flex items-center gap-1">
+                <FlaskConical className="w-3 h-3" />
+                <span>テストページ · D&amp;Dマッピング</span>
+              </span>
+            ) : mode === 'initial' ? (
               <span className="text-[10px] font-bold bg-indigo-600 text-white px-2 py-0.5 rounded font-mono">
                 初版作成 (Rev.0)
               </span>
@@ -1262,13 +1538,17 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
               </span>
             )}
             <h1 className="text-base font-bold text-slate-900">
-              {mode === 'initial'
+              {enableDragDropMapping
+                ? '仕様書作成（テストページ：ドラッグ＆ドロップセル配置）'
+                : mode === 'initial'
                 ? '仕様書作成スタジオ（初版作成 ＆ 台帳登録）'
                 : '仕様書改訂スタジオ（発行台帳から読込・差分ハイライト）'}
             </h1>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            {mode === 'initial'
+            {enableDragDropMapping
+              ? '既存のセルマッピングに加え、左カラムの機器仕様チップを右側のプレビューセルへドラッグ＆ドロップして配置（マッピング登録／今回のみ貼付を切替可能）を検証できます。'
+              : mode === 'initial'
               ? 'テンプレートと機器を選択して仕様内容を入力し、「確定」ボタンでExcel出力と発行台帳JSONへの初版登録を行います。'
               : '過去の発行台帳から機器番号タイトルを選択するだけで複数機器と前版内容を復元。変更箇所の赤文字・赤枠指定と改訂履歴追記を行えます。'}
           </p>
@@ -2137,44 +2417,68 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
               )}
             </div>
 
-            {primaryItem && (
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2 text-xs">
-                <div className="flex items-center justify-between text-[11px] font-semibold text-slate-700">
-                  <span>主仕様機器「{primaryItem.name}」の登録仕様一覧:</span>
-                  <span className="font-mono text-indigo-600 font-bold">{primaryItem.tagNo || '-'}</span>
-                </div>
+            {enableDragDropMapping && activeTemplate && orderedActiveItems.length > 0 ? (
+              <EquipmentSpecDragPalette
+                orderedActiveItems={orderedActiveItems}
+                activeTemplate={activeTemplate}
+                dndMode={dndMode}
+                onChangeDndMode={setDndMode}
+                draggingChip={draggingChip}
+                onDragStartChip={setDraggingChip}
+                onDragEndChip={() => {
+                  setDraggingChip(null);
+                  setDragOverCellAddress(null);
+                }}
+                onJumpToCell={(addr) => setSelectedCellAddress(addr)}
+                overrideChipCells={dndOverrideChipCells}
+                canUndo={dndUndoStack.length > 0}
+                onUndo={handleUndoDnd}
+                hasUnsavedMappingChanges={hasUnsavedDndMapping}
+                templateFolderState={templateFolderState}
+                onSaveMappingToFolder={handleSaveDndMappingToFolder}
+                onDownloadMappingJson={handleDownloadDndMappingJson}
+                isSavingMapping={isSavingDndMapping}
+              />
+            ) : (
+              primaryItem && (
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2 text-xs">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-slate-700">
+                    <span>主仕様機器「{primaryItem.name}」の登録仕様一覧:</span>
+                    <span className="font-mono text-indigo-600 font-bold">{primaryItem.tagNo || '-'}</span>
+                  </div>
 
-                <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
-                  {primaryItem.specs && primaryItem.specs.length > 0 ? (
-                    primaryItem.specs.map((spec) => (
-                      <span
-                        key={spec.id}
-                        className="inline-flex items-center gap-1 bg-white border border-indigo-200 px-2 py-1 rounded text-[11px] font-mono shadow-2xs"
-                      >
-                        <span className="text-slate-500 font-sans">{spec.name}:</span>
-                        <span className="font-bold text-indigo-900">{spec.value}</span>
-                        {spec.unit && <span className="text-slate-500 text-[10px]">{spec.unit}</span>}
+                  <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
+                    {primaryItem.specs && primaryItem.specs.length > 0 ? (
+                      primaryItem.specs.map((spec) => (
+                        <span
+                          key={spec.id}
+                          className="inline-flex items-center gap-1 bg-white border border-indigo-200 px-2 py-1 rounded text-[11px] font-mono shadow-2xs"
+                        >
+                          <span className="text-slate-500 font-sans">{spec.name}:</span>
+                          <span className="font-bold text-indigo-900">{spec.value}</span>
+                          {spec.unit && <span className="text-slate-500 text-[10px]">{spec.unit}</span>}
+                        </span>
+                      ))
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5 font-mono text-[11px]">
+                        {primaryItem.diameter && primaryItem.diameter !== '-' && (
+                          <span className="bg-white border border-slate-200 px-2 py-0.5 rounded">口径: {primaryItem.diameter}</span>
+                        )}
+                        {primaryItem.material && primaryItem.material !== '-' && (
+                          <span className="bg-white border border-slate-200 px-2 py-0.5 rounded">材質: {primaryItem.material}</span>
+                        )}
+                      </div>
+                    )}
+
+                    {primaryItem.deliveryDate && (
+                      <span className="inline-flex items-center gap-1 bg-white border border-slate-200 px-2 py-1 rounded text-[11px] font-mono">
+                        <span className="text-slate-500 font-sans">納期:</span>
+                        <span className="font-semibold text-slate-800">{primaryItem.deliveryDate}</span>
                       </span>
-                    ))
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5 font-mono text-[11px]">
-                      {primaryItem.diameter && primaryItem.diameter !== '-' && (
-                        <span className="bg-white border border-slate-200 px-2 py-0.5 rounded">口径: {primaryItem.diameter}</span>
-                      )}
-                      {primaryItem.material && primaryItem.material !== '-' && (
-                        <span className="bg-white border border-slate-200 px-2 py-0.5 rounded">材質: {primaryItem.material}</span>
-                      )}
-                    </div>
-                  )}
-
-                  {primaryItem.deliveryDate && (
-                    <span className="inline-flex items-center gap-1 bg-white border border-slate-200 px-2 py-1 rounded text-[11px] font-mono">
-                      <span className="text-slate-500 font-sans">納期:</span>
-                      <span className="font-semibold text-slate-800">{primaryItem.deliveryDate}</span>
-                    </span>
-                  )}
+                    )}
+                  </div>
                 </div>
-              </div>
+              )
             )}
           </div>
 
@@ -2420,6 +2724,29 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
               </div>
 
               <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                {enableDragDropMapping && dndUndoStack.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleUndoDnd}
+                    className="px-2.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg text-xs font-bold transition-all shadow-2xs flex items-center gap-1 cursor-pointer shrink-0"
+                    title="直前のドラッグ＆ドロップ操作を元に戻す"
+                  >
+                    <Undo2 className="w-3.5 h-3.5" />
+                    <span>元に戻す</span>
+                  </button>
+                )}
+                {enableDragDropMapping && hasUnsavedDndMapping && (
+                  <button
+                    type="button"
+                    onClick={handleSaveDndMappingToFolder}
+                    disabled={isSavingDndMapping}
+                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1 cursor-pointer shrink-0"
+                    title="追加・変更したセルマッピングを .specmap.json に保存"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>{isSavingDndMapping ? '保存中...' : 'マッピングJSON保存'}</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handleReloadPreview}
@@ -2449,6 +2776,18 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                 }
                 className="flex-1 bg-white border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-900 font-medium focus:outline-hidden focus:border-indigo-500 shadow-2xs"
               />
+              {enableDragDropMapping &&
+                (selectedCellMappingInfo || cellOverrides[selectedCellAddress] !== undefined) && (
+                  <button
+                    type="button"
+                    onClick={handleUnmapSelectedCell}
+                    className="px-2 py-1 rounded text-[10px] font-bold border bg-white text-slate-700 border-slate-300 hover:bg-red-50 hover:text-red-700 hover:border-red-300 shrink-0 cursor-pointer transition-colors inline-flex items-center gap-1"
+                    title={`セル ${selectedCellAddress} のマッピングまたは貼付を解除`}
+                  >
+                    <Unlink className="w-3 h-3" />
+                    <span>{selectedCellMappingInfo ? 'マッピング解除' : '貼付解除'}</span>
+                  </button>
+                )}
               {mode === 'revision' && (
                 <button
                   type="button"
@@ -2464,6 +2803,38 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                 </button>
               )}
             </div>
+
+            {/* Live Drag & Drop Guide Banner */}
+            {enableDragDropMapping && draggingChip && (
+              <div
+                className={`rounded-lg px-3 py-2 text-xs font-semibold flex items-center justify-between gap-2 border shadow-xs transition-all ${
+                  dndMode === 'mapping'
+                    ? 'bg-emerald-50 border-emerald-400 text-emerald-950'
+                    : 'bg-amber-50 border-amber-400 text-amber-950'
+                }`}
+              >
+                <div className="flex items-center gap-2 truncate">
+                  <span
+                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
+                      dndMode === 'mapping'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-amber-600 text-white'
+                    }`}
+                  >
+                    {dndMode === 'mapping' ? 'マッピング登録' : '今回のみ値貼付'}
+                  </span>
+                  <span className="truncate">
+                    [{draggingChip.slotIndex + 1}種類目] <strong>{draggingChip.label}</strong>:{' '}
+                    <span className="font-mono">{draggingChip.value}</span>
+                  </span>
+                </div>
+                <span className="font-mono text-[11px] font-bold shrink-0">
+                  {dragOverCellAddress
+                    ? `→ セル ${dragOverCellAddress} にドロップ`
+                    : 'プレビュー上の任意のセルへドロップ'}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Excel Original Live Grid */}
@@ -2632,6 +3003,8 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                             const isOverridden = cellOverrides[cell.address] !== undefined;
                             const isInlineEditing = inlineEditingCell === cell.address;
                             const isRedHighlight = Boolean(cell.isChangedHighlight);
+                            const isDragTarget =
+                              enableDragDropMapping && dragOverCellAddress === cell.address;
 
                             return (
                               <td
@@ -2643,9 +3016,39 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                                   if (cell.mappedFieldId) setFocusedFieldId(cell.mappedFieldId);
                                 }}
                                 onDoubleClick={() => handleStartInlineEdit(cell)}
-                                title={`セル ${cell.address}${cell.mappedFieldLabel ? ` (連動: ${cell.mappedFieldLabel})` : ''}${isRedHighlight ? ' [変更箇所・赤枠]' : ''} - ダブルクリックで直接書き換え`}
+                                onDragOver={
+                                  enableDragDropMapping
+                                    ? (e) => {
+                                        e.preventDefault();
+                                        e.dataTransfer.dropEffect =
+                                          dndMode === 'mapping' ? 'link' : 'copy';
+                                        if (dragOverCellAddress !== cell.address) {
+                                          setDragOverCellAddress(cell.address);
+                                        }
+                                      }
+                                    : undefined
+                                }
+                                onDragLeave={
+                                  enableDragDropMapping
+                                    ? () => {
+                                        if (dragOverCellAddress === cell.address) {
+                                          setDragOverCellAddress(null);
+                                        }
+                                      }
+                                    : undefined
+                                }
+                                onDrop={
+                                  enableDragDropMapping
+                                    ? (e) => handleCellDrop(e, cell)
+                                    : undefined
+                                }
+                                title={`セル ${cell.address}${cell.mappedFieldLabel ? ` (連動: ${cell.mappedFieldLabel})` : ''}${isRedHighlight ? ' [変更箇所・赤枠]' : ''}${enableDragDropMapping ? ' - 仕様チップをドロップして配置 / ダブルクリックで直接書き換え' : ' - ダブルクリックで直接書き換え'}`}
                                 style={{
-                                  backgroundColor: isSelected
+                                  backgroundColor: isDragTarget
+                                    ? dndMode === 'mapping'
+                                      ? '#D1FAE5'
+                                      : '#FEF3C7'
+                                    : isSelected
                                     ? '#EEF2FF'
                                     : isRedHighlight
                                     ? '#FEF2F2'
@@ -2668,19 +3071,25 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                                   borderRight: isRedHighlight
                                     ? '2px solid #DC2626'
                                     : cell.borderRightStyle || (cell.borderRight ? '1px solid #475569' : '1px solid #e2e8f0'),
-                                  outline: isRedHighlight ? '2px solid #DC2626' : undefined,
-                                  outlineOffset: isRedHighlight ? '-2px' : undefined,
+                                  outline: isDragTarget
+                                    ? dndMode === 'mapping'
+                                      ? '2px dashed #059669'
+                                      : '2px dashed #D97706'
+                                    : isRedHighlight
+                                    ? '2px solid #DC2626'
+                                    : undefined,
+                                  outlineOffset: isDragTarget || isRedHighlight ? '-2px' : undefined,
                                   padding: isInlineEditing ? '0px' : '2px 4px',
                                   wordBreak: 'break-word',
                                   lineHeight: 1.25,
                                   whiteSpace: 'pre-wrap',
                                   overflow: 'hidden',
-                                  position: isRedHighlight ? 'relative' : undefined,
-                                  zIndex: isRedHighlight ? 5 : undefined,
+                                  position: isDragTarget || isRedHighlight ? 'relative' : undefined,
+                                  zIndex: isDragTarget ? 15 : isRedHighlight ? 5 : undefined,
                                 }}
                                 className={`transition-colors cursor-cell select-text ${
-                                  isSelected ? 'ring-2 ring-indigo-600 bg-indigo-50/70 z-10 font-bold shadow-xs' : ''
-                                } ${isMapped && !isSelected ? 'hover:bg-indigo-50/40' : 'hover:bg-slate-50'}`}
+                                  isSelected && !isDragTarget ? 'ring-2 ring-indigo-600 bg-indigo-50/70 z-10 font-bold shadow-xs' : ''
+                                } ${isMapped && !isSelected && !isDragTarget ? 'hover:bg-indigo-50/40' : !isDragTarget ? 'hover:bg-slate-50' : ''}`}
                               >
                                 {isInlineEditing ? (
                                   <input
@@ -2728,7 +3137,9 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
                   <span>
-                    {mode === 'revision'
+                    {enableDragDropMapping
+                      ? '💡 左の仕様チップをセルへドラッグ＆ドロップして配置 / Wクリックで直接編集'
+                      : mode === 'revision'
                       ? '💡 セルWクリック・数式バーで直接編集 / 赤枠指定で改訂箇所を赤文字・赤枠化'
                       : '💡 セルWクリック・数式バーで直接編集できます'}
                   </span>
@@ -2745,6 +3156,98 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Overwrite Confirmation Modal for Drag & Drop onto Occupied Cell */}
+      {enableDragDropMapping && pendingDropConfirm && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-[1px] flex items-center justify-center p-4"
+          onClick={() => setPendingDropConfirm(null)}
+        >
+          <div
+            className="bg-white border border-slate-200 rounded-xl shadow-2xl max-w-md w-full p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-lg bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-slate-900">
+                  セル {pendingDropConfirm.cell.address} を上書きしますか？
+                </h3>
+                <p className="text-xs text-slate-600">
+                  このセルにはすでに内容またはマッピングが存在します。上書きして配置するか確認してください。
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2 text-xs">
+              <div className="flex items-start justify-between gap-2">
+                <span className="text-slate-500 font-semibold shrink-0">現在のセル内容:</span>
+                <span className="font-mono text-slate-800 text-right break-all">
+                  {pendingDropConfirm.cell.value || '（空文字）'}
+                  {pendingDropConfirm.cell.mappedFieldLabel && (
+                    <span className="ml-1 text-[10px] text-indigo-700 font-sans">
+                      [連動: {pendingDropConfirm.cell.mappedFieldLabel}]
+                    </span>
+                  )}
+                </span>
+              </div>
+              <div className="border-t border-slate-200 pt-2 flex items-start justify-between gap-2">
+                <span className="text-emerald-700 font-bold shrink-0">新しく配置する内容:</span>
+                <span className="font-mono font-bold text-slate-900 text-right break-all">
+                  {pendingDropConfirm.chip.label}: {pendingDropConfirm.chip.value}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2 text-[11px] pt-1">
+                <span className="text-slate-500">反映パターン:</span>
+                <span
+                  className={`font-bold px-2 py-0.5 rounded text-[10px] ${
+                    pendingDropConfirm.mode === 'mapping'
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : 'bg-amber-100 text-amber-900'
+                  }`}
+                >
+                  {pendingDropConfirm.mode === 'mapping'
+                    ? 'マッピング登録（テンプレートへ反映）'
+                    : '今回のみ値貼付（単発上書き）'}
+                </span>
+              </div>
+              {((pendingDropConfirm.cell.colSpan || 1) > 1 ||
+                (pendingDropConfirm.cell.rowSpan || 1) > 1) && (
+                <div className="text-[10px] text-slate-500 pt-1">
+                  ※結合セルのため、代表セル（{pendingDropConfirm.cell.address}）に書き込まれます。
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingDropConfirm(null)}
+                className="px-3.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg cursor-pointer transition-colors"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = pendingDropConfirm;
+                  setPendingDropConfirm(null);
+                  executeChipDrop(target.chip, target.cell.address, target.mode);
+                }}
+                className={`px-4 py-1.5 text-xs font-bold text-white rounded-lg cursor-pointer shadow-xs transition-colors ${
+                  pendingDropConfirm.mode === 'mapping'
+                    ? 'bg-emerald-600 hover:bg-emerald-700'
+                    : 'bg-amber-600 hover:bg-amber-700'
+                }`}
+              >
+                上書きして配置
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

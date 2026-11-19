@@ -238,13 +238,13 @@ export default function App() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
   const [isSavingJson, setIsSavingJson] = useState<boolean>(false);
 
-  // Tab State (Initial Creation & Revision are separate tabs)
+  // Tab State (Initial Creation, Test Page & Revision are separate tabs)
   const [activeTab, setActiveTab] = useState<AppTab>('database');
-  const [lastSpecTab, setLastSpecTab] = useState<'spec_initial' | 'spec_revision'>('spec_initial');
+  const [lastSpecTab, setLastSpecTab] = useState<'spec_initial' | 'spec_initial_test' | 'spec_revision'>('spec_initial');
   const [adminInitialTemplateId, setAdminInitialTemplateId] = useState<string>('');
 
   const handleTabChange = useCallback((nextTab: AppTab) => {
-    if (nextTab === 'spec_initial' || nextTab === 'spec_revision') {
+    if (nextTab === 'spec_initial' || nextTab === 'spec_initial_test' || nextTab === 'spec_revision') {
       setLastSpecTab(nextTab);
     }
     setActiveTab(nextTab);
@@ -3212,6 +3212,33 @@ export default function App() {
               handleTabChange('templates');
             }}
             onUpdateTemplates={handleUpdateAllTemplates}
+          />
+        )}
+
+        {/* Tab 2A-Test: Specification Creation Test Page (Drag & Drop Cell Mapping) */}
+        {activeTab === 'spec_initial_test' && (
+          <SpecDashboardTab
+            key={`spec_initial_test_${activeProjectId}`}
+            mode="initial"
+            enableDragDropMapping={true}
+            items={items}
+            categories={projectCategories}
+            templates={templates}
+            activeProjectId={activeProjectId}
+            currentProject={currentProject}
+            ledgerRecords={activeLedgerRecords}
+            templateFolderState={templateFolderState}
+            onReconnectTemplateFolder={handleSyncTemplateFolder}
+            onConfirmIssuance={handleConfirmSpecIssuance}
+            onCreateNewLedgerFile={handleCreateNewLedgerFile}
+            onRelinkLedgerFile={handleRelinkLedgerFile}
+            onReconnectLedgerFile={handleReconnectLedgerFile}
+            onOpenAdminMapping={(tplId) => {
+              setAdminInitialTemplateId(tplId);
+              handleTabChange('templates');
+            }}
+            onUpdateTemplates={handleUpdateAllTemplates}
+            onSaveMappingToFolder={handleSaveTemplateMappingToFolder}
           />
         )}
 

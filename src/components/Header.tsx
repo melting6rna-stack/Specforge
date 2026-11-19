@@ -11,12 +11,13 @@ import {
   RefreshCw,
   AlertTriangle,
   FileCode,
-  Save
+  Save,
+  FlaskConical
 } from 'lucide-react';
 import { ProjectWorkspace } from '../types';
 import brandLogoUrl from '../assets/brand-logo.png?inline';
 
-export type AppTab = 'database' | 'spec_initial' | 'spec_revision' | 'templates' | 'projects';
+export type AppTab = 'database' | 'spec_initial' | 'spec_initial_test' | 'spec_revision' | 'templates' | 'projects';
 
 interface HeaderProps {
   activeTab: AppTab;
@@ -105,6 +106,19 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <FileText className="w-3.5 h-3.5" />
               <span>仕様書作成</span>
+            </button>
+
+            <button
+              onClick={() => onTabChange('spec_initial_test')}
+              className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+                activeTab === 'spec_initial_test'
+                  ? 'bg-emerald-700 text-white font-semibold shadow-2xs'
+                  : 'text-emerald-800 hover:text-emerald-950 hover:bg-emerald-50 border border-emerald-200/80'
+              }`}
+              title="プレビューへのドラッグ＆ドロップでセルマッピングを検証するテストページ"
+            >
+              <FlaskConical className="w-3.5 h-3.5" />
+              <span>仕様書作成（テストページ）</span>
             </button>
 
             <button
