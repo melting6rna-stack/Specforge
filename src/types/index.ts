@@ -140,7 +140,26 @@ export interface SpecTemplate {
   cellMappings?: CellMappingField[];
   // Table row mapping for list of equipments
   tableMapping?: TableColumnMapping;
+  // External reference folder metadata
+  sourceLocation?: 'folder' | 'local';
+  folderName?: string;
+  folderRelativePath?: string;
+  excelFileName?: string;
+  mappingFileName?: string;
+  hasPairedMappingFile?: boolean;
   updatedAt: string;
+}
+
+export interface TemplateFolderState {
+  folderName: string;
+  lastSyncAt?: string;
+  needsPermission?: boolean;
+  isError?: boolean;
+  errorMessage?: string;
+  excelCount: number;
+  mappingCount: number;
+  pairedCount: number;
+  mode: 'handle' | 'upload_cache';
 }
 
 export interface SpecMappingAssetFile {
@@ -155,6 +174,7 @@ export interface SpecMappingAssetFile {
   fields: SpecFieldMapping[];
   tableMapping?: TableColumnMapping;
   masterFileName?: string;
+  excelFileName?: string;
   masterWorkbookBase64?: string;
 }
 
@@ -208,6 +228,11 @@ export interface SpecRevisionSnapshot {
   docNo: string;
   templateId: string;
   templateName: string;
+  templateCode?: string;
+  templateSource?: 'folder' | 'preset' | 'custom_excel';
+  templateExcelFileName?: string;
+  templateMappingFileName?: string;
+  templateFolderName?: string;
   orderedItemIds: string[];
   primaryItemId: string;
   itemTagNos: string[];
@@ -227,6 +252,11 @@ export interface SpecIssuanceRecord {
   docNo: string; // 仕様書番号
   templateId: string;
   templateName: string;
+  templateCode?: string;
+  templateSource?: 'folder' | 'preset' | 'custom_excel';
+  templateExcelFileName?: string;
+  templateMappingFileName?: string;
+  templateFolderName?: string;
   orderedItemIds: string[];
   primaryItemId: string;
   itemTagNos: string[];

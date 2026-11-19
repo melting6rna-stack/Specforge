@@ -683,6 +683,23 @@ export async function requestFileHandlePermission(
 /**
  * Reads database JSON from a linked FileSystemFileHandle with full error capture.
  */
+/**
+ * Silently reads file.lastModified without prompting for permissions.
+ * Returns null if permission is not granted or file cannot be accessed.
+ */
+export async function getFileHandleLastModified(
+  handle: FileSystemFileHandle
+): Promise<number | null> {
+  try {
+    const perm = await checkFileHandlePermission(handle, 'read');
+    if (perm !== 'granted') return null;
+    const file = await handle.getFile();
+    return file.lastModified || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function readFromProjectHandle(
   handle: FileSystemFileHandle,
   projectId: string,
@@ -691,6 +708,7 @@ export async function readFromProjectHandle(
 ): Promise<{
   payload: DatabasePayload;
   fileName: string;
+  lastModified: number;
 }> {
   try {
     const allowPrompt = options?.allowPromptRequest ?? false;
@@ -718,7 +736,8 @@ export async function readFromProjectHandle(
           items: [],
           schemaType: 'specforge-v2'
         },
-        fileName: file.name
+        fileName: file.name,
+        lastModified: file.lastModified
       };
     }
 
@@ -738,7 +757,8 @@ export async function readFromProjectHandle(
 
     return {
       payload,
-      fileName: file.name
+      fileName: file.name,
+      lastModified: file.lastModified
     };
   } catch (err: any) {
     if (err instanceof PermissionRequiredError || err instanceof FileMissingError) {
@@ -768,7 +788,7 @@ export async function writeToProjectHandle(
   schemaType?: 'tokki-equipment' | 'specforge-v2' | 'generic',
   project?: ProjectWorkspace,
   options?: { allowPromptRequest?: boolean }
-): Promise<void> {
+): Promise<number> {
   try {
     const allowPrompt = options?.allowPromptRequest ?? false;
     const perm = await checkFileHandlePermission(handle, 'readwrite');
@@ -939,6 +959,12 @@ export async function writeToProjectHandle(
     const writable = await (handle as any).createWritable();
     await writable.write(JSON.stringify(fileContent, null, 2));
     await writable.close();
+    try {
+      const updatedFile = await handle.getFile();
+      return updatedFile.lastModified;
+    } catch {
+      return Date.now();
+    }
   } catch (err: any) {
     if (err instanceof PermissionRequiredError || err instanceof FileMissingError) {
       throw err;

@@ -18,18 +18,32 @@ import {
   EquipmentClassification,
   SpecIssuanceRecord,
   SpecLedgerFile,
+  TemplateFolderState,
 } from './types';
 import { placeItemWithResequence, resequenceProjectItems } from './utils/tagNumbering';
 import { DEFAULT_TEMPLATES } from './data/defaultTemplates';
 import { INITIAL_PROJECTS, INITIAL_CATEGORIES, INITIAL_ITEMS } from './data/sampleOrders';
 import { parseEquipmentExcel } from './utils/excelTemplateParser';
 import { normalizeSpecTemplate } from './utils/templateUtils';
+import {
+  saveTemplateFolderHandle,
+  getSavedTemplateFolderHandle,
+  removeSavedTemplateFolderHandle,
+  saveCachedFolderTemplates,
+  getCachedFolderTemplates,
+  clearCachedFolderTemplates,
+  scanDirectoryHandleForTemplates,
+  loadTemplatesFromFileList,
+  writeMappingToTemplateFolder,
+  checkDirectoryHandlePermission,
+} from './utils/templateFolderSync';
 import { 
   DatabasePayload,
   PermissionRequiredError,
   FileMissingError,
   checkFileHandlePermission,
   requestFileHandlePermission,
+  getFileHandleLastModified,
   saveFileHandleForProject,
   getSavedFileHandleForProject,
   removeSavedFileHandleForProject,
@@ -46,7 +60,29 @@ import {
   readLedgerFromHandle,
   writeLedgerToHandle,
 } from './utils/ledgerSyncManager';
-import { Bell, AlertTriangle, RefreshCw, HardDrive, Save, Link2 } from 'lucide-react';
+import {
+  ConflictChoice,
+  EquipmentConflict,
+  LedgerConflict,
+  mergeEquipmentDatabase,
+  applyEquipmentConflictResolutions,
+  mergeLedgerRecords,
+  applyLedgerConflictResolutions,
+} from './utils/mergeConflictUtils';
+import { ConflictResolutionModal } from './components/ConflictResolutionModal';
+import { Bell, AlertTriangle, RefreshCw, HardDrive, Save, Link2, GitMerge } from 'lucide-react';
+
+function cloneSnapshot<T>(value: T): T {
+  if (typeof structuredClone === 'function') {
+    return structuredClone(value);
+  }
+  return JSON.parse(JSON.stringify(value));
+}
+
+function hasMtimeChanged(diskMtime?: number | null, baseMtime?: number): boolean {
+  if (!diskMtime || !baseMtime) return false;
+  return Math.abs(diskMtime - baseMtime) > 50;
+}
 
 function sanitizeProjectsForStorage(list: ProjectWorkspace[]): ProjectWorkspace[] {
   return list.map(
@@ -141,14 +177,17 @@ export default function App() {
     return ensureItemEquipmentTypes(INITIAL_ITEMS);
   });
 
-  // 4. Templates state (normalized to individual 4-slot cell mappings)
-  const [templates, setTemplates] = useState<SpecTemplate[]>(() => {
+  // 4. Templates state: keep local/preset templates in localStorage and folder templates in IndexedDB
+  // so multiple Excel workbooks from an external folder never exceed localStorage's 5MB quota.
+  const [localTemplates, setLocalTemplates] = useState<SpecTemplate[]>(() => {
     try {
       const saved = localStorage.getItem('specforge_templates_v2');
       if (saved) {
         const parsed: SpecTemplate[] = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          return parsed.map(normalizeSpecTemplate);
+          return parsed
+            .filter(t => t.sourceLocation !== 'folder')
+            .map(normalizeSpecTemplate);
         }
       }
     } catch (e) {
@@ -157,14 +196,27 @@ export default function App() {
     return DEFAULT_TEMPLATES.map(normalizeSpecTemplate);
   });
 
-  // Persist templates to localStorage whenever updated
+  const [folderTemplates, setFolderTemplates] = useState<SpecTemplate[]>([]);
+  const [templateFolderState, setTemplateFolderState] = useState<TemplateFolderState | null>(null);
+  const [isFolderTemplateSyncing, setIsFolderTemplateSyncing] = useState<boolean>(false);
+  const templateFolderHandleRef = useRef<FileSystemDirectoryHandle | null>(null);
+
+  const templates = useMemo(() => {
+    const folderIds = new Set(folderTemplates.map(t => t.id));
+    return [...folderTemplates, ...localTemplates.filter(t => !folderIds.has(t.id))];
+  }, [folderTemplates, localTemplates]);
+
+  // Persist only local/preset templates to localStorage
   useEffect(() => {
     try {
-      localStorage.setItem('specforge_templates_v2', JSON.stringify(templates));
+      localStorage.setItem(
+        'specforge_templates_v2',
+        JSON.stringify(localTemplates.filter(t => t.sourceLocation !== 'folder'))
+      );
     } catch (e) {
       console.warn('Failed to save templates to localStorage', e);
     }
-  }, [templates]);
+  }, [localTemplates]);
 
   // Specification Issuance Ledger JSON state (strictly separate from Equipment DB!)
   const [specLedgers, setSpecLedgers] = useState<Record<string, SpecLedgerFile>>(() => {
@@ -189,6 +241,7 @@ export default function App() {
   // Tab State (Initial Creation & Revision are separate tabs)
   const [activeTab, setActiveTab] = useState<AppTab>('database');
   const [lastSpecTab, setLastSpecTab] = useState<'spec_initial' | 'spec_revision'>('spec_initial');
+  const [adminInitialTemplateId, setAdminInitialTemplateId] = useState<string>('');
 
   const handleTabChange = useCallback((nextTab: AppTab) => {
     if (nextTab === 'spec_initial' || nextTab === 'spec_revision') {
@@ -215,6 +268,120 @@ export default function App() {
   // Active Project's File Handles (Equipment DB & Issuance Ledger kept strictly separate)
   const activeFileHandleRef = useRef<FileSystemFileHandle | null>(null);
   const activeLedgerHandleRef = useRef<FileSystemFileHandle | null>(null);
+
+  // Live state refs to avoid stale closures in async merge/persist handlers
+  const itemsRef = useRef<EquipmentItem[]>(items);
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
+  const categoriesRef = useRef<Category[]>(categories);
+  useEffect(() => {
+    categoriesRef.current = categories;
+  }, [categories]);
+
+  const projectsRef = useRef<ProjectWorkspace[]>(projects);
+  useEffect(() => {
+    projectsRef.current = projects;
+  }, [projects]);
+
+  const specLedgersRef = useRef<Record<string, SpecLedgerFile>>(specLedgers);
+  useEffect(() => {
+    specLedgersRef.current = specLedgers;
+  }, [specLedgers]);
+
+  const templatesRef = useRef<SpecTemplate[]>(templates);
+  useEffect(() => {
+    templatesRef.current = templates;
+  }, [templates]);
+
+  const hasUnsavedChangesRef = useRef<boolean>(hasUnsavedChanges);
+  useEffect(() => {
+    hasUnsavedChangesRef.current = hasUnsavedChanges;
+  }, [hasUnsavedChanges]);
+
+  // Concurrency & 3-way merge baseline snapshots per project
+  const dbBaseStateRef = useRef<
+    Record<string, { items: EquipmentItem[]; categories: Category[]; lastModified: number }>
+  >({});
+  const ledgerBaseStateRef = useRef<
+    Record<string, { records: SpecIssuanceRecord[]; lastModified: number }>
+  >({});
+  const isBusySyncingOrWritingRef = useRef<boolean>(false);
+
+  const setDbBaseSnapshot = useCallback(
+    (projectId: string, projectItems: EquipmentItem[], projectCats: Category[], lastModified: number) => {
+      dbBaseStateRef.current[projectId] = {
+        items: cloneSnapshot(projectItems),
+        categories: cloneSnapshot(projectCats),
+        lastModified,
+      };
+    },
+    []
+  );
+
+  const setLedgerBaseSnapshot = useCallback(
+    (projectId: string, records: SpecIssuanceRecord[], lastModified: number) => {
+      ledgerBaseStateRef.current[projectId] = {
+        records: cloneSnapshot(records),
+        lastModified,
+      };
+    },
+    []
+  );
+
+  // Remote file update notifications & conflict resolution modal state
+  const [remoteUpdates, setRemoteUpdates] = useState<
+    Record<string, { dbUpdated?: boolean; ledgerUpdated?: boolean }>
+  >({});
+
+  const clearRemoteUpdateFlag = useCallback(
+    (projectId: string, kind: 'db' | 'ledger') => {
+      setRemoteUpdates(prev => {
+        const cur = prev[projectId];
+        if (!cur) return prev;
+        if (kind === 'db' && !cur.dbUpdated) return prev;
+        if (kind === 'ledger' && !cur.ledgerUpdated) return prev;
+        return {
+          ...prev,
+          [projectId]: {
+            ...cur,
+            ...(kind === 'db' ? { dbUpdated: false } : { ledgerUpdated: false }),
+          },
+        };
+      });
+    },
+    []
+  );
+
+  const [conflictModalState, setConflictModalState] = useState<{
+    isOpen: boolean;
+    type: 'equipment' | 'ledger';
+    projectId: string;
+    fileName?: string;
+    autoMergedInfoText?: string;
+    isResolving?: boolean;
+    equipment?: {
+      autoMergedItems: EquipmentItem[];
+      autoMergedCategories: Category[];
+      conflicts: EquipmentConflict[];
+      diskLastModified: number;
+      diskSchemaType?: 'tokki-equipment' | 'specforge-v2' | 'generic';
+      diskRawDocument?: any;
+      saveAfterResolve?: boolean;
+    };
+    ledger?: {
+      autoMergedRecords: SpecIssuanceRecord[];
+      conflicts: LedgerConflict[];
+      diskLastModified: number;
+      saveAfterResolve?: boolean;
+      pendingResolve?: (res: { savedToDisk: boolean; needsPermission?: boolean }) => void;
+    };
+  }>({
+    isOpen: false,
+    type: 'equipment',
+    projectId: '',
+  });
 
   const currentProject = projects.find(p => p.id === activeProjectId) || projects[0];
   const activeLedger = specLedgers[activeProjectId];
@@ -318,7 +485,7 @@ export default function App() {
         } else if (e.key === 'specforge_templates_v2') {
           const parsed: SpecTemplate[] = JSON.parse(e.newValue);
           if (Array.isArray(parsed)) {
-            setTemplates(parsed.map(normalizeSpecTemplate));
+            setLocalTemplates(parsed.filter(t => t.sourceLocation !== 'folder').map(normalizeSpecTemplate));
           }
         } else if (e.key === 'specforge_ledgers_v1') {
           setSpecLedgers(JSON.parse(e.newValue));
@@ -345,13 +512,26 @@ export default function App() {
       if (handle) {
         try {
           // Never requestPermission automatically without user gesture on mount/reload/new window
-          const { payload, fileName } = await readFromProjectHandle(
+          const { payload, fileName, lastModified } = await readFromProjectHandle(
             handle, 
             activeProjectId, 
             `cat-${activeProjectId}-etc`,
             { allowPromptRequest: false }
           );
           if (isCancelled) return;
+
+          let scopedCats = categoriesRef.current.filter(c => c.projectId === activeProjectId);
+          // Scope categories strictly for this project
+          if (payload.categories && payload.categories.length > 0) {
+            scopedCats = payload.categories.map(c => ({
+              ...c,
+              projectId: activeProjectId
+            }));
+            setCategories(prev => {
+              const otherProjectsCats = prev.filter(c => c.projectId && c.projectId !== activeProjectId);
+              return [...otherProjectsCats, ...scopedCats];
+            });
+          }
 
           // Merge loaded items for this project
           if (payload.items && payload.items.length > 0) {
@@ -361,17 +541,8 @@ export default function App() {
             });
           }
 
-          // Scope categories strictly for this project
-          if (payload.categories && payload.categories.length > 0) {
-            const scopedCats = payload.categories.map(c => ({
-              ...c,
-              projectId: activeProjectId
-            }));
-            setCategories(prev => {
-              const otherProjectsCats = prev.filter(c => c.projectId && c.projectId !== activeProjectId);
-              return [...otherProjectsCats, ...scopedCats];
-            });
-          }
+          setDbBaseSnapshot(activeProjectId, payload.items || [], scopedCats, lastModified);
+          clearRemoteUpdateFlag(activeProjectId, 'db');
 
           // Mark project as healthy and record schemaType
           setProjects(prev => prev.map(p => {
@@ -442,7 +613,7 @@ export default function App() {
     return () => {
       isCancelled = true;
     };
-  }, [activeProjectId]);
+  }, [activeProjectId, clearRemoteUpdateFlag, setDbBaseSnapshot]);
 
   // Load active project Specification Issuance Ledger handle from IndexedDB when activeProjectId changes
   useEffect(() => {
@@ -457,8 +628,8 @@ export default function App() {
 
       if (handle) {
         try {
-          const prj = projects.find(p => p.id === activeProjectId);
-          const { ledger, fileName } = await readLedgerFromHandle(
+          const prj = projectsRef.current.find(p => p.id === activeProjectId);
+          const { ledger, fileName, lastModified } = await readLedgerFromHandle(
             handle,
             activeProjectId,
             prj,
@@ -470,6 +641,8 @@ export default function App() {
             ...prev,
             [activeProjectId]: ledger,
           }));
+          setLedgerBaseSnapshot(activeProjectId, ledger.records, lastModified);
+          clearRemoteUpdateFlag(activeProjectId, 'ledger');
 
           setProjects(prev => prev.map(p => p.id === activeProjectId ? {
             ...p,
@@ -519,13 +692,146 @@ export default function App() {
     return () => {
       isCancelled = true;
     };
+  }, [activeProjectId, clearRemoteUpdateFlag, setLedgerBaseSnapshot]);
+
+  // Load saved external Template Reference Folder handle + cache on mount
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadTemplateFolderOnMount() {
+      const cached = await getCachedFolderTemplates();
+      const handle = await getSavedTemplateFolderHandle();
+      if (isCancelled) return;
+      templateFolderHandleRef.current = handle;
+
+      if (cached && cached.templates.length > 0) {
+        setFolderTemplates(cached.templates.map(normalizeSpecTemplate));
+      }
+
+      if (handle) {
+        try {
+          const scanned = await scanDirectoryHandleForTemplates(handle, { allowPromptRequest: false });
+          if (isCancelled) return;
+          const nowStr = new Date().toLocaleTimeString('ja-JP');
+          setFolderTemplates(scanned.templates);
+          setTemplateFolderState({
+            folderName: scanned.folderName,
+            lastSyncAt: nowStr,
+            needsPermission: false,
+            isError: false,
+            excelCount: scanned.stats.excelCount,
+            mappingCount: scanned.stats.mappingCount,
+            pairedCount: scanned.stats.pairedCount,
+            mode: 'handle',
+          });
+          await saveCachedFolderTemplates({
+            folderName: scanned.folderName,
+            mode: 'handle',
+            lastSyncAt: nowStr,
+            stats: scanned.stats,
+            templates: scanned.templates,
+          });
+        } catch (err: any) {
+          if (isCancelled) return;
+          if (err instanceof PermissionRequiredError) {
+            setTemplateFolderState({
+              folderName: handle.name || cached?.folderName || '参照元フォルダ',
+              lastSyncAt: cached?.lastSyncAt,
+              needsPermission: true,
+              isError: false,
+              excelCount: cached?.stats.excelCount ?? 0,
+              mappingCount: cached?.stats.mappingCount ?? 0,
+              pairedCount: cached?.stats.pairedCount ?? 0,
+              mode: 'handle',
+            });
+          } else {
+            setTemplateFolderState({
+              folderName: handle.name || cached?.folderName || '参照元フォルダ',
+              lastSyncAt: cached?.lastSyncAt,
+              needsPermission: false,
+              isError: true,
+              errorMessage: err?.message || '参照元フォルダの読み込みに失敗しました。',
+              excelCount: cached?.stats.excelCount ?? 0,
+              mappingCount: cached?.stats.mappingCount ?? 0,
+              pairedCount: cached?.stats.pairedCount ?? 0,
+              mode: 'handle',
+            });
+          }
+        }
+      } else if (cached) {
+        setTemplateFolderState({
+          folderName: cached.folderName,
+          lastSyncAt: cached.lastSyncAt,
+          needsPermission: false,
+          isError: false,
+          excelCount: cached.stats.excelCount,
+          mappingCount: cached.stats.mappingCount,
+          pairedCount: cached.stats.pairedCount,
+          mode: cached.mode,
+        });
+      }
+    }
+
+    loadTemplateFolderOnMount();
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  // Silent check for external updates on shared JSON files (on window focus & periodic polling)
+  const checkRemoteUpdates = useCallback(async () => {
+    if (!activeProjectId || isBusySyncingOrWritingRef.current) return;
+
+    let nextDbUpdated = false;
+    let nextLedgerUpdated = false;
+
+    const dbHandle = activeFileHandleRef.current;
+    const dbBase = dbBaseStateRef.current[activeProjectId];
+    if (dbHandle && dbBase?.lastModified) {
+      const diskMtime = await getFileHandleLastModified(dbHandle);
+      if (hasMtimeChanged(diskMtime, dbBase.lastModified)) {
+        nextDbUpdated = true;
+      }
+    }
+
+    const ledgerHandle = activeLedgerHandleRef.current;
+    const ledgerBase = ledgerBaseStateRef.current[activeProjectId];
+    if (ledgerHandle && ledgerBase?.lastModified) {
+      const ledgerDiskMtime = await getFileHandleLastModified(ledgerHandle);
+      if (hasMtimeChanged(ledgerDiskMtime, ledgerBase.lastModified)) {
+        nextLedgerUpdated = true;
+      }
+    }
+
+    setRemoteUpdates(prev => {
+      const cur = prev[activeProjectId] || {};
+      if (Boolean(cur.dbUpdated) === nextDbUpdated && Boolean(cur.ledgerUpdated) === nextLedgerUpdated) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [activeProjectId]: {
+          dbUpdated: nextDbUpdated,
+          ledgerUpdated: nextLedgerUpdated,
+        },
+      };
+    });
   }, [activeProjectId]);
 
-  // Re-check permission silently when window regains focus (e.g. if granted in browser/another tab)
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void checkRemoteUpdates();
+      }
+    }, 12000);
+    return () => window.clearInterval(timer);
+  }, [checkRemoteUpdates]);
+
+  // Re-check permission & remote changes silently when window regains focus
   useEffect(() => {
     const handleWindowFocus = async () => {
       if (!activeProjectId) return;
-      const prj = projects.find(p => p.id === activeProjectId);
+      const prj = projectsRef.current.find(p => p.id === activeProjectId);
 
       // Check Equipment DB JSON handle
       const handle = activeFileHandleRef.current;
@@ -533,17 +839,21 @@ export default function App() {
         const perm = await checkFileHandlePermission(handle, 'read');
         if (perm === 'granted') {
           try {
-            const { payload, fileName } = await readFromProjectHandle(
+            const { payload, fileName, lastModified } = await readFromProjectHandle(
               handle,
               activeProjectId,
               `cat-${activeProjectId}-etc`,
               { allowPromptRequest: false }
             );
-            if (!hasUnsavedChanges && payload.items && payload.items.length > 0) {
+            if (!hasUnsavedChangesRef.current && payload.items && payload.items.length > 0) {
               setItems(prev => {
                 const otherItems = prev.filter(it => it.projectId !== activeProjectId);
                 return [...otherItems, ...payload.items];
               });
+              const scopedCats = payload.categories?.length
+                ? payload.categories.map(c => ({ ...c, projectId: activeProjectId }))
+                : categoriesRef.current.filter(c => c.projectId === activeProjectId);
+              setDbBaseSnapshot(activeProjectId, payload.items, scopedCats, lastModified);
             }
             setProjects(prev => prev.map(p => p.id === activeProjectId ? {
               ...p,
@@ -565,7 +875,7 @@ export default function App() {
         const perm = await checkFileHandlePermission(ledgerHandle, 'read');
         if (perm === 'granted') {
           try {
-            const { ledger, fileName } = await readLedgerFromHandle(
+            const { ledger, fileName, lastModified } = await readLedgerFromHandle(
               ledgerHandle,
               activeProjectId,
               prj,
@@ -575,6 +885,7 @@ export default function App() {
               ...prev,
               [activeProjectId]: ledger,
             }));
+            setLedgerBaseSnapshot(activeProjectId, ledger.records, lastModified);
             setProjects(prev => prev.map(p => p.id === activeProjectId ? {
               ...p,
               linkedLedgerFileName: fileName || p.linkedLedgerFileName,
@@ -588,12 +899,268 @@ export default function App() {
           }
         }
       }
+
+      void checkRemoteUpdates();
+
+      // Silently re-check template folder permission on focus
+      const tplDirHandle = templateFolderHandleRef.current;
+      if (tplDirHandle) {
+        const perm = await checkDirectoryHandlePermission(tplDirHandle, 'read');
+        if (perm === 'granted') {
+          try {
+            const scanned = await scanDirectoryHandleForTemplates(tplDirHandle, { allowPromptRequest: false });
+            const nowStr = new Date().toLocaleTimeString('ja-JP');
+            setFolderTemplates(scanned.templates);
+            setTemplateFolderState({
+              folderName: scanned.folderName,
+              lastSyncAt: nowStr,
+              needsPermission: false,
+              isError: false,
+              excelCount: scanned.stats.excelCount,
+              mappingCount: scanned.stats.mappingCount,
+              pairedCount: scanned.stats.pairedCount,
+              mode: 'handle',
+            });
+          } catch {
+            // ignore silent refresh error
+          }
+        }
+      }
     };
     window.addEventListener('focus', handleWindowFocus);
     return () => window.removeEventListener('focus', handleWindowFocus);
-  }, [activeProjectId, projects, hasUnsavedChanges]);
+  }, [activeProjectId, checkRemoteUpdates, setDbBaseSnapshot, setLedgerBaseSnapshot]);
 
-  // Helper to persist active project's items & categories to its linked JSON file handle
+  // Reference folder registration & sync handlers
+  const handleSelectTemplateFolder = useCallback(async (): Promise<{
+    selected: boolean;
+    fallbackToInput?: boolean;
+    errorMessage?: string;
+  }> => {
+    if (!('showDirectoryPicker' in window)) {
+      return { selected: false, fallbackToInput: true };
+    }
+    try {
+      setIsFolderTemplateSyncing(true);
+      let dirHandle: FileSystemDirectoryHandle;
+      try {
+        dirHandle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
+      } catch (err: any) {
+        if (err?.name === 'AbortError') {
+          return { selected: false };
+        }
+        if (err?.name === 'SecurityError') {
+          // Cross-origin iframe may block readwrite or showDirectoryPicker; fallback to input[webkitdirectory]
+          return { selected: false, fallbackToInput: true };
+        }
+        // Fallback to read-only picker if readwrite failed for other reasons
+        dirHandle = await (window as any).showDirectoryPicker({ mode: 'read' });
+      }
+
+      templateFolderHandleRef.current = dirHandle;
+      await saveTemplateFolderHandle(dirHandle);
+
+      const scanned = await scanDirectoryHandleForTemplates(dirHandle, { allowPromptRequest: true });
+      const nowStr = new Date().toLocaleTimeString('ja-JP');
+      setFolderTemplates(scanned.templates);
+      setTemplateFolderState({
+        folderName: scanned.folderName,
+        lastSyncAt: nowStr,
+        needsPermission: false,
+        isError: false,
+        excelCount: scanned.stats.excelCount,
+        mappingCount: scanned.stats.mappingCount,
+        pairedCount: scanned.stats.pairedCount,
+        mode: 'handle',
+      });
+      await saveCachedFolderTemplates({
+        folderName: scanned.folderName,
+        mode: 'handle',
+        lastSyncAt: nowStr,
+        stats: scanned.stats,
+        templates: scanned.templates,
+      });
+
+      setSyncNotice(
+        `参照元フォルダ「${scanned.folderName}」を登録しました（Excel ${scanned.stats.excelCount}件 / 自動ペアリング ${scanned.stats.pairedCount}件）。`
+      );
+      setTimeout(() => setSyncNotice(''), 5000);
+      return { selected: true };
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        return { selected: false };
+      }
+      if (err?.name === 'SecurityError' || err?.message?.toLowerCase().includes('cross origin')) {
+        return { selected: false, fallbackToInput: true };
+      }
+      return {
+        selected: false,
+        errorMessage: err?.message || '参照元フォルダの登録に失敗しました。',
+      };
+    } finally {
+      setIsFolderTemplateSyncing(false);
+    }
+  }, []);
+
+  const handleImportTemplateFolderFiles = useCallback(async (files: FileList) => {
+    if (!files || files.length === 0) return;
+    setIsFolderTemplateSyncing(true);
+    try {
+      templateFolderHandleRef.current = null;
+      await removeSavedTemplateFolderHandle();
+
+      const scanned = await loadTemplatesFromFileList(files);
+      const nowStr = new Date().toLocaleTimeString('ja-JP');
+      setFolderTemplates(scanned.templates);
+      setTemplateFolderState({
+        folderName: scanned.folderName,
+        lastSyncAt: nowStr,
+        needsPermission: false,
+        isError: false,
+        excelCount: scanned.stats.excelCount,
+        mappingCount: scanned.stats.mappingCount,
+        pairedCount: scanned.stats.pairedCount,
+        mode: 'upload_cache',
+      });
+      await saveCachedFolderTemplates({
+        folderName: scanned.folderName,
+        mode: 'upload_cache',
+        lastSyncAt: nowStr,
+        stats: scanned.stats,
+        templates: scanned.templates,
+      });
+
+      setSyncNotice(
+        `フォルダ「${scanned.folderName}」からテンプレートを取り込みました（Excel ${scanned.stats.excelCount}件 / 自動ペアリング ${scanned.stats.pairedCount}件）。`
+      );
+      setTimeout(() => setSyncNotice(''), 5000);
+    } finally {
+      setIsFolderTemplateSyncing(false);
+    }
+  }, []);
+
+  const handleSyncTemplateFolder = useCallback(async () => {
+    const handle = templateFolderHandleRef.current || (await getSavedTemplateFolderHandle());
+    if (!handle) return;
+    templateFolderHandleRef.current = handle;
+    setIsFolderTemplateSyncing(true);
+    try {
+      const scanned = await scanDirectoryHandleForTemplates(handle, { allowPromptRequest: true });
+      const nowStr = new Date().toLocaleTimeString('ja-JP');
+      setFolderTemplates(scanned.templates);
+      setTemplateFolderState({
+        folderName: scanned.folderName,
+        lastSyncAt: nowStr,
+        needsPermission: false,
+        isError: false,
+        excelCount: scanned.stats.excelCount,
+        mappingCount: scanned.stats.mappingCount,
+        pairedCount: scanned.stats.pairedCount,
+        mode: 'handle',
+      });
+      await saveCachedFolderTemplates({
+        folderName: scanned.folderName,
+        mode: 'handle',
+        lastSyncAt: nowStr,
+        stats: scanned.stats,
+        templates: scanned.templates,
+      });
+      setSyncNotice(
+        `参照元フォルダ「${scanned.folderName}」を再読込しました（Excel ${scanned.stats.excelCount}件 / ペアリング ${scanned.stats.pairedCount}件）。`
+      );
+      setTimeout(() => setSyncNotice(''), 4000);
+    } catch (err: any) {
+      setTemplateFolderState(prev =>
+        prev
+          ? {
+              ...prev,
+              needsPermission: err instanceof PermissionRequiredError,
+              isError: !(err instanceof PermissionRequiredError),
+              errorMessage: err instanceof PermissionRequiredError ? undefined : err?.message,
+            }
+          : null
+      );
+    } finally {
+      setIsFolderTemplateSyncing(false);
+    }
+  }, []);
+
+  const handleClearTemplateFolder = useCallback(async () => {
+    templateFolderHandleRef.current = null;
+    await removeSavedTemplateFolderHandle();
+    await clearCachedFolderTemplates();
+    setFolderTemplates([]);
+    setTemplateFolderState(null);
+    setSyncNotice('参照元フォルダの登録を解除しました。');
+    setTimeout(() => setSyncNotice(''), 4000);
+  }, []);
+
+  const handleSaveTemplateMappingToFolder = useCallback(
+    async (tpl: SpecTemplate): Promise<{ writtenToFolder: boolean; fileName: string; message?: string }> => {
+      const handle = templateFolderHandleRef.current || (await getSavedTemplateFolderHandle());
+      if (!handle) {
+        return {
+          writtenToFolder: false,
+          fileName: '',
+          message: 'フォルダ書き込みハンドルが利用できないため、ブラウザ内キャッシュへ保存しました。',
+        };
+      }
+      const { fileName } = await writeMappingToTemplateFolder(handle, tpl, { allowPromptRequest: true });
+      setFolderTemplates(prev => {
+        const next = prev.map(t =>
+          t.id === tpl.id
+            ? {
+                ...tpl,
+                mappingFileName: fileName,
+                hasPairedMappingFile: true,
+              }
+            : t
+        );
+        if (templateFolderState) {
+          void saveCachedFolderTemplates({
+            folderName: templateFolderState.folderName,
+            mode: templateFolderState.mode,
+            lastSyncAt: new Date().toLocaleTimeString('ja-JP'),
+            stats: {
+              excelCount: templateFolderState.excelCount,
+              mappingCount: templateFolderState.mappingCount,
+              pairedCount: next.filter(x => x.hasPairedMappingFile).length,
+            },
+            templates: next,
+          });
+        }
+        return next;
+      });
+      return { writtenToFolder: true, fileName };
+    },
+    [templateFolderState]
+  );
+
+  const handleUpdateAllTemplates = useCallback(
+    (updated: SpecTemplate[]) => {
+      const nextFolder = updated.filter(t => t.sourceLocation === 'folder').map(normalizeSpecTemplate);
+      const nextLocal = updated.filter(t => t.sourceLocation !== 'folder').map(normalizeSpecTemplate);
+      setFolderTemplates(nextFolder);
+      setLocalTemplates(nextLocal);
+
+      if (templateFolderState) {
+        void saveCachedFolderTemplates({
+          folderName: templateFolderState.folderName,
+          mode: templateFolderState.mode,
+          lastSyncAt: templateFolderState.lastSyncAt || new Date().toLocaleTimeString('ja-JP'),
+          stats: {
+            excelCount: templateFolderState.excelCount,
+            mappingCount: templateFolderState.mappingCount,
+            pairedCount: nextFolder.filter(x => x.hasPairedMappingFile).length,
+          },
+          templates: nextFolder,
+        });
+      }
+    },
+    [templateFolderState]
+  );
+
+  // Helper to persist active project's items & categories to its linked JSON file handle with 3-way merge protection
   const persistItemsToLinkedJson = useCallback(async (
     targetProjectId: string, 
     updatedItemsForProject: EquipmentItem[],
@@ -610,30 +1177,124 @@ export default function App() {
 
     if (!handle) return false;
 
+    isBusySyncingOrWritingRef.current = true;
     try {
-      const prj = projects.find(p => p.id === targetProjectId) || currentProject;
-      const targetCats = customCategories || categories.filter(c => c.projectId === targetProjectId);
+      const prj = projectsRef.current.find(p => p.id === targetProjectId) || currentProject;
+      const targetCats = customCategories || categoriesRef.current.filter(c => c.projectId === targetProjectId);
       const catsToSave = targetCats.length > 0 ? targetCats : projectCategories;
 
+      const base = dbBaseStateRef.current[targetProjectId];
+      const diskMtime = await getFileHandleLastModified(handle);
+
+      let itemsToWrite = updatedItemsForProject;
+      let catsToWrite = catsToSave;
+      let effectiveSchemaType = prj?.schemaType;
+      let effectiveRawDocument = prj?.rawDocument;
+      let mergeNoticeMsg = '';
+
+      // Conflict detection: check if another user updated the JSON on disk since our baseline
+      if (base && hasMtimeChanged(diskMtime, base.lastModified)) {
+        const latest = await readFromProjectHandle(
+          handle,
+          targetProjectId,
+          `cat-${targetProjectId}-etc`,
+          { allowPromptRequest: options?.allowPromptRequest ?? false }
+        );
+
+        if (hasMtimeChanged(latest.lastModified, base.lastModified)) {
+          const diskCats = (latest.payload.categories || []).map(c => ({
+            ...c,
+            projectId: targetProjectId,
+          }));
+          const mergeRes = mergeEquipmentDatabase(
+            base.items,
+            latest.payload.items || [],
+            updatedItemsForProject,
+            base.categories,
+            diskCats,
+            catsToSave
+          );
+
+          effectiveSchemaType = latest.payload.schemaType || prj?.schemaType;
+          effectiveRawDocument = latest.payload.rawDocument || prj?.rawDocument;
+
+          const autoCount =
+            mergeRes.autoMergedSummary.addedFromDisk +
+            mergeRes.autoMergedSummary.updatedFromDisk +
+            mergeRes.autoMergedSummary.deletedFromDisk;
+
+          if (mergeRes.conflicts.length > 0) {
+            const autoInfo =
+              autoCount > 0
+                ? `他ユーザーによる別機器/別項目の更新（${autoCount}件）は自動で統合済みです。競合した${mergeRes.conflicts.length}箇所のみ選択してください。`
+                : `競合した${mergeRes.conflicts.length}箇所について採用する値を選択してください。`;
+
+            setConflictModalState({
+              isOpen: true,
+              type: 'equipment',
+              projectId: targetProjectId,
+              fileName: latest.fileName,
+              autoMergedInfoText: autoInfo,
+              equipment: {
+                autoMergedItems: mergeRes.mergedItems,
+                autoMergedCategories: mergeRes.mergedCategories,
+                conflicts: mergeRes.conflicts,
+                diskLastModified: latest.lastModified,
+                diskSchemaType: effectiveSchemaType,
+                diskRawDocument: effectiveRawDocument,
+                saveAfterResolve: true,
+              },
+            });
+            return false;
+          }
+
+          // Zero conflicts -> auto-merge succeeded cleanly!
+          itemsToWrite = mergeRes.mergedItems;
+          catsToWrite = mergeRes.mergedCategories.length > 0 ? mergeRes.mergedCategories : catsToSave;
+
+          setItems(prev => {
+            const otherItems = prev.filter(it => it.projectId !== targetProjectId);
+            const nextAll = [...otherItems, ...itemsToWrite];
+            itemsRef.current = nextAll;
+            return nextAll;
+          });
+          setCategories(prev => {
+            const otherCats = prev.filter(c => c.projectId && c.projectId !== targetProjectId);
+            const nextCatsAll = [...otherCats, ...catsToWrite];
+            categoriesRef.current = nextCatsAll;
+            return nextCatsAll;
+          });
+
+          if (autoCount > 0) {
+            mergeNoticeMsg = `他ユーザーの最新更新（${autoCount}件）と自動マージしてJSONへ保存しました。`;
+          }
+        }
+      }
+
       const payload: DatabasePayload = {
-        version: prj?.schemaType === 'tokki-equipment' ? '1.1' : '2.0',
+        version: effectiveSchemaType === 'tokki-equipment' ? '1.1' : '2.0',
         lastUpdated: new Date().toISOString(),
-        items: updatedItemsForProject,
-        categories: catsToSave,
-        templates,
-        schemaType: prj?.schemaType,
-        rawDocument: prj?.rawDocument
+        items: itemsToWrite,
+        categories: catsToWrite,
+        templates: templatesRef.current,
+        schemaType: effectiveSchemaType,
+        rawDocument: effectiveRawDocument,
       };
 
-      await writeToProjectHandle(handle, payload, prj?.schemaType, prj, {
+      const newLastModified = await writeToProjectHandle(handle, payload, effectiveSchemaType, prj, {
         allowPromptRequest: options?.allowPromptRequest ?? false
       });
+
+      setDbBaseSnapshot(targetProjectId, itemsToWrite, catsToWrite, newLastModified);
+      clearRemoteUpdateFlag(targetProjectId, 'db');
 
       const nowTime = new Date().toLocaleTimeString('ja-JP');
       setProjects(prev => prev.map(p => {
         if (p.id === targetProjectId) {
           return {
             ...p,
+            schemaType: effectiveSchemaType || p.schemaType,
+            rawDocument: effectiveRawDocument || p.rawDocument,
             needsLinkPermission: false,
             isLinkError: false,
             linkErrorMessage: undefined,
@@ -642,6 +1303,11 @@ export default function App() {
         }
         return p;
       }));
+
+      if (mergeNoticeMsg) {
+        setSyncNotice(mergeNoticeMsg);
+        setTimeout(() => setSyncNotice(''), 6000);
+      }
       return true;
     } catch (err: any) {
       if (err instanceof PermissionRequiredError) {
@@ -675,12 +1341,15 @@ export default function App() {
       }));
       if (options?.throwOnError) throw err;
       return false;
+    } finally {
+      isBusySyncingOrWritingRef.current = false;
     }
-  }, [activeProjectId, categories, currentProject, projectCategories, projects, templates]);
+  }, [activeProjectId, clearRemoteUpdateFlag, currentProject, projectCategories, setDbBaseSnapshot]);
 
-  // Synchronize active project from its linked JSON file (user-triggered)
+  // Synchronize active project from its linked JSON file (user-triggered, 3-way merge aware if unsaved edits exist)
   const performSyncProject = useCallback(async (targetProjectId: string, isAuto = false) => {
     setIsSyncing(true);
+    isBusySyncingOrWritingRef.current = true;
     try {
       // Access ref synchronously first to preserve user activation for requestPermission
       let handle = targetProjectId === activeProjectId ? activeFileHandleRef.current : null;
@@ -695,7 +1364,7 @@ export default function App() {
         throw new FileMissingError('このブラウザ環境には紐づけされたJSONファイルの参照が存在しません。ファイルを再指定してください。');
       }
 
-      const { payload, fileName } = await readFromProjectHandle(
+      const { payload, fileName, lastModified } = await readFromProjectHandle(
         handle, 
         targetProjectId, 
         `cat-${targetProjectId}-etc`,
@@ -703,21 +1372,107 @@ export default function App() {
       );
 
       if (payload && payload.items) {
+        const diskCats = (payload.categories || []).map(c => ({
+          ...c,
+          projectId: targetProjectId
+        }));
+        const base = dbBaseStateRef.current[targetProjectId];
+        const localProjectItems = itemsRef.current.filter(it => it.projectId === targetProjectId);
+        const localProjectCats = categoriesRef.current.filter(c => c.projectId === targetProjectId);
+
+        // If user has unsaved local edits and we have a baseline, perform 3-way auto-merge instead of overwriting!
+        if (hasUnsavedChangesRef.current && base) {
+          const mergeRes = mergeEquipmentDatabase(
+            base.items,
+            payload.items,
+            localProjectItems,
+            base.categories,
+            diskCats,
+            localProjectCats
+          );
+
+          const autoCount =
+            mergeRes.autoMergedSummary.addedFromDisk +
+            mergeRes.autoMergedSummary.updatedFromDisk +
+            mergeRes.autoMergedSummary.deletedFromDisk;
+
+          if (mergeRes.conflicts.length > 0) {
+            setConflictModalState({
+              isOpen: true,
+              type: 'equipment',
+              projectId: targetProjectId,
+              fileName,
+              autoMergedInfoText:
+                autoCount > 0
+                  ? `他ユーザーの更新（${autoCount}件）は自動統合済みです。競合した${mergeRes.conflicts.length}箇所を選択して保存してください。`
+                  : `編集中データと最新ファイルで${mergeRes.conflicts.length}箇所の競合が見つかりました。`,
+              equipment: {
+                autoMergedItems: mergeRes.mergedItems,
+                autoMergedCategories: mergeRes.mergedCategories,
+                conflicts: mergeRes.conflicts,
+                diskLastModified: lastModified,
+                diskSchemaType: payload.schemaType,
+                diskRawDocument: payload.rawDocument,
+                saveAfterResolve: true,
+              },
+            });
+            return;
+          }
+
+          // Clean 3-way merge into active local workspace while advancing baseline to disk
+          setItems(prev => {
+            const otherItems = prev.filter(it => it.projectId !== targetProjectId);
+            const nextAll = [...otherItems, ...mergeRes.mergedItems];
+            itemsRef.current = nextAll;
+            return nextAll;
+          });
+          if (mergeRes.mergedCategories.length > 0) {
+            setCategories(prev => {
+              const otherProjectsCats = prev.filter(c => c.projectId && c.projectId !== targetProjectId);
+              const nextAllCats = [...otherProjectsCats, ...mergeRes.mergedCategories];
+              categoriesRef.current = nextAllCats;
+              return nextAllCats;
+            });
+          }
+          setDbBaseSnapshot(targetProjectId, payload.items, diskCats, lastModified);
+          clearRemoteUpdateFlag(targetProjectId, 'db');
+
+          const nowStr = new Date().toLocaleTimeString('ja-JP');
+          setProjects(prev => prev.map(p => p.id === targetProjectId ? {
+            ...p,
+            linkedJsonFileName: fileName,
+            linkedJsonLastSync: nowStr,
+            schemaType: payload.schemaType || p.schemaType,
+            rawDocument: payload.rawDocument || p.rawDocument,
+            needsLinkPermission: false,
+            isLinkError: false,
+            linkErrorMessage: undefined
+          } : p));
+
+          setSyncNotice(
+            `「${fileName}」の最新データ（${autoCount}件）を安全に取り込み、あなたの編集中データと自動マージしました（必要に応じて「保存」してください）。`
+          );
+          setTimeout(() => setSyncNotice(''), 6000);
+          return;
+        }
+
+        // No unsaved edits -> cleanly replace with disk data and update baseline
         setItems(prev => {
           const otherItems = prev.filter(it => it.projectId !== targetProjectId);
           return [...otherItems, ...payload.items];
         });
 
-        if (payload.categories && payload.categories.length > 0) {
-          const scopedCats = payload.categories.map(c => ({
-            ...c,
-            projectId: targetProjectId
-          }));
+        let finalCats = localProjectCats;
+        if (diskCats.length > 0) {
+          finalCats = diskCats;
           setCategories(prev => {
             const otherProjectsCats = prev.filter(c => c.projectId && c.projectId !== targetProjectId);
-            return [...otherProjectsCats, ...scopedCats];
+            return [...otherProjectsCats, ...diskCats];
           });
         }
+
+        setDbBaseSnapshot(targetProjectId, payload.items, finalCats, lastModified);
+        clearRemoteUpdateFlag(targetProjectId, 'db');
 
         const nowStr = new Date().toLocaleTimeString('ja-JP');
         setProjects(prev => prev.map(p => {
@@ -767,9 +1522,10 @@ export default function App() {
         }));
       }
     } finally {
+      isBusySyncingOrWritingRef.current = false;
       setIsSyncing(false);
     }
-  }, [activeProjectId]);
+  }, [activeProjectId, clearRemoteUpdateFlag, setDbBaseSnapshot]);
 
   // 1-click reconnect using existing IndexedDB FileSystemFileHandle (no file picker needed!)
   const handleReconnectProjectFile = useCallback(async (targetProjectId: string) => {
@@ -800,10 +1556,10 @@ export default function App() {
         return;
       }
 
-      if (hasUnsavedChanges) {
-        // Keep local edits and flush them immediately to the linked JSON file
-        const projectItems = items.filter(it => it.projectId === targetProjectId);
-        const projectCats = categories.filter(c => c.projectId === targetProjectId);
+      if (hasUnsavedChangesRef.current) {
+        // Keep local edits and flush them via 3-way merge to the linked JSON file
+        const projectItems = itemsRef.current.filter(it => it.projectId === targetProjectId);
+        const projectCats = categoriesRef.current.filter(c => c.projectId === targetProjectId);
         const saved = await persistItemsToLinkedJson(targetProjectId, projectItems, projectCats, {
           allowPromptRequest: true,
           throwOnError: true
@@ -815,7 +1571,7 @@ export default function App() {
         }
       } else {
         // Sync latest from disk
-        const { payload, fileName } = await readFromProjectHandle(
+        const { payload, fileName, lastModified } = await readFromProjectHandle(
           handle,
           targetProjectId,
           `cat-${targetProjectId}-etc`,
@@ -828,8 +1584,9 @@ export default function App() {
             return [...otherItems, ...payload.items];
           });
         }
+        let scopedCats = categoriesRef.current.filter(c => c.projectId === targetProjectId);
         if (payload && payload.categories && payload.categories.length > 0) {
-          const scopedCats = payload.categories.map(c => ({
+          scopedCats = payload.categories.map(c => ({
             ...c,
             projectId: targetProjectId
           }));
@@ -838,6 +1595,9 @@ export default function App() {
             return [...otherProjectsCats, ...scopedCats];
           });
         }
+
+        setDbBaseSnapshot(targetProjectId, payload.items || [], scopedCats, lastModified);
+        clearRemoteUpdateFlag(targetProjectId, 'db');
 
         const nowStr = new Date().toLocaleTimeString('ja-JP');
         setProjects(prev => prev.map(p => p.id === targetProjectId ? {
@@ -868,7 +1628,7 @@ export default function App() {
     } finally {
       setIsSyncing(false);
     }
-  }, [activeProjectId, categories, hasUnsavedChanges, items, persistItemsToLinkedJson]);
+  }, [activeProjectId, clearRemoteUpdateFlag, persistItemsToLinkedJson, setDbBaseSnapshot]);
 
   // NOTE: Periodic auto-save has been removed per user instruction.
   // Changes are saved manually via the Save button or the exit confirmation modal.
@@ -898,7 +1658,7 @@ export default function App() {
         }
 
         // Read and sync immediately
-        const { payload, fileName } = await readFromProjectHandle(
+        const { payload, fileName, lastModified } = await readFromProjectHandle(
           handle, 
           targetProjectId, 
           `cat-${targetProjectId}-etc`,
@@ -912,8 +1672,9 @@ export default function App() {
           });
         }
 
+        let scopedCats = categoriesRef.current.filter(c => c.projectId === targetProjectId);
         if (payload.categories && payload.categories.length > 0) {
-          const scopedCats = payload.categories.map(c => ({
+          scopedCats = payload.categories.map(c => ({
             ...c,
             projectId: targetProjectId
           }));
@@ -922,6 +1683,9 @@ export default function App() {
             return [...otherProjectsCats, ...scopedCats];
           });
         }
+
+        setDbBaseSnapshot(targetProjectId, payload.items || [], scopedCats, lastModified);
+        clearRemoteUpdateFlag(targetProjectId, 'db');
 
         const nowStr = new Date().toLocaleTimeString('ja-JP');
         setProjects(prev => prev.map(p => {
@@ -966,6 +1730,10 @@ export default function App() {
     if (handle) {
       await saveFileHandleForProject(newPrj.id, handle);
       activeFileHandleRef.current = handle;
+      const mtime = await getFileHandleLastModified(handle);
+      if (mtime) {
+        setDbBaseSnapshot(newPrj.id, initialItems || [], [], mtime);
+      }
     }
 
     setActiveProjectId(newPrj.id);
@@ -1031,7 +1799,7 @@ export default function App() {
       });
 
       setIsLedgerSyncing(true);
-      await writeLedgerToHandle(handle, initialLedger, { allowPromptRequest: true });
+      const writtenMtime = await writeLedgerToHandle(handle, initialLedger, { allowPromptRequest: true });
       await saveLedgerHandleForProject(targetProjectId, handle);
       if (targetProjectId === activeProjectId) {
         activeLedgerHandleRef.current = handle;
@@ -1039,6 +1807,8 @@ export default function App() {
 
       const nowStr = new Date().toLocaleTimeString('ja-JP');
       setSpecLedgers(prev => ({ ...prev, [targetProjectId]: initialLedger }));
+      setLedgerBaseSnapshot(targetProjectId, initialLedger.records, writtenMtime);
+      clearRemoteUpdateFlag(targetProjectId, 'ledger');
       setProjects(prev => prev.map(p => p.id === targetProjectId ? {
         ...p,
         linkedLedgerFileName: handle.name || suggestedName,
@@ -1085,13 +1855,15 @@ export default function App() {
         activeLedgerHandleRef.current = handle;
       }
 
-      const prj = projects.find(p => p.id === targetProjectId);
-      const { ledger, fileName } = await readLedgerFromHandle(handle, targetProjectId, prj, {
+      const prj = projectsRef.current.find(p => p.id === targetProjectId);
+      const { ledger, fileName, lastModified } = await readLedgerFromHandle(handle, targetProjectId, prj, {
         allowPromptRequest: true,
       });
 
       const nowStr = new Date().toLocaleTimeString('ja-JP');
       setSpecLedgers(prev => ({ ...prev, [targetProjectId]: ledger }));
+      setLedgerBaseSnapshot(targetProjectId, ledger.records, lastModified);
+      clearRemoteUpdateFlag(targetProjectId, 'ledger');
       setProjects(prev => prev.map(p => p.id === targetProjectId ? {
         ...p,
         linkedLedgerFileName: fileName,
@@ -1140,13 +1912,15 @@ export default function App() {
         return;
       }
 
-      const prj = projects.find(p => p.id === targetProjectId);
-      const { ledger, fileName } = await readLedgerFromHandle(handle, targetProjectId, prj, {
+      const prj = projectsRef.current.find(p => p.id === targetProjectId);
+      const { ledger, fileName, lastModified } = await readLedgerFromHandle(handle, targetProjectId, prj, {
         allowPromptRequest: false,
       });
 
       const nowStr = new Date().toLocaleTimeString('ja-JP');
       setSpecLedgers(prev => ({ ...prev, [targetProjectId]: ledger }));
+      setLedgerBaseSnapshot(targetProjectId, ledger.records, lastModified);
+      clearRemoteUpdateFlag(targetProjectId, 'ledger');
       setProjects(prev => prev.map(p => p.id === targetProjectId ? {
         ...p,
         linkedLedgerFileName: fileName,
@@ -1172,11 +1946,12 @@ export default function App() {
     } finally {
       setIsLedgerSyncing(false);
     }
-  }, [activeProjectId, projects]);
+  }, [activeProjectId, clearRemoteUpdateFlag, setLedgerBaseSnapshot]);
 
-  // Manual re-sync of Issuance Ledger JSON from disk
+  // Manual re-sync of Issuance Ledger JSON from disk (3-way merge aware)
   const handleSyncLedgerFile = useCallback(async (targetProjectId: string) => {
     setIsLedgerSyncing(true);
+    isBusySyncingOrWritingRef.current = true;
     try {
       let handle = targetProjectId === activeProjectId ? activeLedgerHandleRef.current : null;
       if (!handle) {
@@ -1189,13 +1964,67 @@ export default function App() {
         throw new FileMissingError('発行台帳JSONファイルの参照が存在しません。ファイルを指定してください。');
       }
 
-      const prj = projects.find(p => p.id === targetProjectId);
-      const { ledger, fileName } = await readLedgerFromHandle(handle, targetProjectId, prj, {
+      const prj = projectsRef.current.find(p => p.id === targetProjectId);
+      const { ledger, fileName, lastModified } = await readLedgerFromHandle(handle, targetProjectId, prj, {
         allowPromptRequest: true,
       });
 
+      const base = ledgerBaseStateRef.current[targetProjectId];
+      const localRecords = specLedgersRef.current[targetProjectId]?.records || [];
+
+      if (base && localRecords.length > 0) {
+        const mergeRes = mergeLedgerRecords(base.records, ledger.records, localRecords);
+        if (mergeRes.conflicts.length > 0) {
+          setConflictModalState({
+            isOpen: true,
+            type: 'ledger',
+            projectId: targetProjectId,
+            fileName,
+            autoMergedInfoText:
+              mergeRes.autoMergedCount > 0
+                ? `他ユーザーの更新（${mergeRes.autoMergedCount}件）は自動統合済みです。競合した${mergeRes.conflicts.length}箇所を選択してください。`
+                : `同一仕様書・同一リビジョンに${mergeRes.conflicts.length}箇所の競合があります。`,
+            ledger: {
+              autoMergedRecords: mergeRes.mergedRecords,
+              conflicts: mergeRes.conflicts,
+              diskLastModified: lastModified,
+              saveAfterResolve: true,
+            },
+          });
+          return;
+        }
+
+        const mergedLedger: SpecLedgerFile = {
+          ...ledger,
+          records: mergeRes.mergedRecords,
+        };
+        setSpecLedgers(prev => ({ ...prev, [targetProjectId]: mergedLedger }));
+        setLedgerBaseSnapshot(targetProjectId, ledger.records, lastModified);
+        clearRemoteUpdateFlag(targetProjectId, 'ledger');
+
+        const nowStr = new Date().toLocaleTimeString('ja-JP');
+        setProjects(prev => prev.map(p => p.id === targetProjectId ? {
+          ...p,
+          linkedLedgerFileName: fileName,
+          linkedLedgerLastSync: nowStr,
+          needsLedgerPermission: false,
+          isLedgerLinkError: false,
+          ledgerErrorMessage: undefined,
+        } : p));
+
+        setSyncNotice(
+          mergeRes.autoMergedCount > 0
+            ? `発行台帳JSON「${fileName}」の最新更新（${mergeRes.autoMergedCount}件）を自動マージしました (${nowStr})`
+            : `発行台帳JSON「${fileName}」から最新台帳 (${mergedLedger.records.length}件) を同期しました (${nowStr})`
+        );
+        setTimeout(() => setSyncNotice(''), 5000);
+        return;
+      }
+
       const nowStr = new Date().toLocaleTimeString('ja-JP');
       setSpecLedgers(prev => ({ ...prev, [targetProjectId]: ledger }));
+      setLedgerBaseSnapshot(targetProjectId, ledger.records, lastModified);
+      clearRemoteUpdateFlag(targetProjectId, 'ledger');
       setProjects(prev => prev.map(p => p.id === targetProjectId ? {
         ...p,
         linkedLedgerFileName: fileName,
@@ -1224,9 +2053,10 @@ export default function App() {
         } : p));
       }
     } finally {
+      isBusySyncingOrWritingRef.current = false;
       setIsLedgerSyncing(false);
     }
-  }, [activeProjectId, projects]);
+  }, [activeProjectId, clearRemoteUpdateFlag, setLedgerBaseSnapshot]);
 
   // Export download copy of Issuance Ledger JSON
   const handleExportLedgerJson = (targetProjectId: string) => {
@@ -1245,30 +2075,26 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
-  // Confirm specification issuance: upsert snapshot record into SpecLedgerFile and persist to disk if linked
+  // Confirm specification issuance: upsert snapshot record into SpecLedgerFile with 3-way merge protection
   const handleConfirmSpecIssuance = async (
     record: SpecIssuanceRecord
   ): Promise<{ savedToDisk: boolean; needsPermission?: boolean }> => {
     const targetProjectId = record.projectId || activeProjectId;
-    const prj = projects.find(p => p.id === targetProjectId) || currentProject;
-    const baseLedger = specLedgers[targetProjectId]
-      ? normalizeLedgerJson(specLedgers[targetProjectId], targetProjectId, prj)
+    const prj = projectsRef.current.find(p => p.id === targetProjectId) || currentProject;
+    const baseLedger = specLedgersRef.current[targetProjectId]
+      ? normalizeLedgerJson(specLedgersRef.current[targetProjectId], targetProjectId, prj)
       : createEmptyLedgerPayload(prj, targetProjectId);
 
     const remaining = baseLedger.records.filter(r => r.id !== record.id);
+    const nextRecords = [record, ...remaining];
     const nextLedger: SpecLedgerFile = {
       ...baseLedger,
       projectOrderNo: prj?.orderNo || baseLedger.projectOrderNo,
       projectCode: prj?.code || baseLedger.projectCode,
       projectName: prj?.name || baseLedger.projectName,
       lastUpdated: new Date().toISOString(),
-      records: [record, ...remaining],
+      records: nextRecords,
     };
-
-    setSpecLedgers(prev => ({
-      ...prev,
-      [targetProjectId]: nextLedger,
-    }));
 
     let handle = targetProjectId === activeProjectId ? activeLedgerHandleRef.current : null;
     if (!handle) {
@@ -1279,11 +2105,74 @@ export default function App() {
     }
 
     if (!handle) {
+      setSpecLedgers(prev => ({
+        ...prev,
+        [targetProjectId]: nextLedger,
+      }));
       return { savedToDisk: false };
     }
 
+    isBusySyncingOrWritingRef.current = true;
     try {
-      await writeLedgerToHandle(handle, nextLedger, { allowPromptRequest: true });
+      const ledgerBase = ledgerBaseStateRef.current[targetProjectId];
+      const diskMtime = await getFileHandleLastModified(handle);
+
+      let finalLedgerToWrite = nextLedger;
+      let autoMergeNotice = '';
+
+      if (ledgerBase && hasMtimeChanged(diskMtime, ledgerBase.lastModified)) {
+        const latestDisk = await readLedgerFromHandle(handle, targetProjectId, prj, {
+          allowPromptRequest: true,
+        });
+
+        if (hasMtimeChanged(latestDisk.lastModified, ledgerBase.lastModified)) {
+          const mergeRes = mergeLedgerRecords(
+            ledgerBase.records,
+            latestDisk.ledger.records,
+            nextRecords
+          );
+
+          if (mergeRes.conflicts.length > 0) {
+            isBusySyncingOrWritingRef.current = false;
+            return await new Promise<{ savedToDisk: boolean; needsPermission?: boolean }>((resolve) => {
+              setConflictModalState({
+                isOpen: true,
+                type: 'ledger',
+                projectId: targetProjectId,
+                fileName: latestDisk.fileName,
+                autoMergedInfoText:
+                  mergeRes.autoMergedCount > 0
+                    ? `他ユーザーによる別仕様書/別リビジョンの登録（${mergeRes.autoMergedCount}件）は自動統合済みです。競合した${mergeRes.conflicts.length}箇所のみ選択してください。`
+                    : `同一仕様書・同一リビジョンに対して他ユーザーの更新と競合しています。`,
+                ledger: {
+                  autoMergedRecords: mergeRes.mergedRecords,
+                  conflicts: mergeRes.conflicts,
+                  diskLastModified: latestDisk.lastModified,
+                  saveAfterResolve: true,
+                  pendingResolve: resolve,
+                },
+              });
+            });
+          }
+
+          finalLedgerToWrite = {
+            ...nextLedger,
+            records: mergeRes.mergedRecords,
+          };
+          if (mergeRes.autoMergedCount > 0) {
+            autoMergeNotice = `他ユーザーの発行台帳更新（${mergeRes.autoMergedCount}件）と自動マージして保存しました。`;
+          }
+        }
+      }
+
+      const newMtime = await writeLedgerToHandle(handle, finalLedgerToWrite, { allowPromptRequest: true });
+      setSpecLedgers(prev => ({
+        ...prev,
+        [targetProjectId]: finalLedgerToWrite,
+      }));
+      setLedgerBaseSnapshot(targetProjectId, finalLedgerToWrite.records, newMtime);
+      clearRemoteUpdateFlag(targetProjectId, 'ledger');
+
       const nowStr = new Date().toLocaleTimeString('ja-JP');
       setProjects(prev => prev.map(p => p.id === targetProjectId ? {
         ...p,
@@ -1293,8 +2182,18 @@ export default function App() {
         isLedgerLinkError: false,
         ledgerErrorMessage: undefined,
       } : p));
+
+      if (autoMergeNotice) {
+        setSyncNotice(autoMergeNotice);
+        setTimeout(() => setSyncNotice(''), 6000);
+      }
       return { savedToDisk: true };
     } catch (err: any) {
+      // Preserve in local browser memory if disk save failed
+      setSpecLedgers(prev => ({
+        ...prev,
+        [targetProjectId]: nextLedger,
+      }));
       if (err instanceof PermissionRequiredError) {
         setProjects(prev => prev.map(p => p.id === targetProjectId ? {
           ...p,
@@ -1311,42 +2210,220 @@ export default function App() {
         ledgerErrorMessage: err.message || '発行台帳JSONへの書き込みに失敗しました。',
       } : p));
       return { savedToDisk: false };
+    } finally {
+      isBusySyncingOrWritingRef.current = false;
     }
   };
 
-  // Delete an issuance record from the active project's ledger
+  // Delete an issuance record from the active project's ledger (with 3-way merge check)
   const handleDeleteLedgerRecord = async (recordId: string) => {
     const targetProjectId = activeProjectId;
-    const prj = projects.find(p => p.id === targetProjectId) || currentProject;
-    const baseLedger = specLedgers[targetProjectId];
+    const prj = projectsRef.current.find(p => p.id === targetProjectId) || currentProject;
+    const baseLedger = specLedgersRef.current[targetProjectId];
     if (!baseLedger) return;
 
+    const nextRecords = baseLedger.records.filter(r => r.id !== recordId);
     const nextLedger: SpecLedgerFile = {
       ...baseLedger,
       lastUpdated: new Date().toISOString(),
-      records: baseLedger.records.filter(r => r.id !== recordId),
+      records: nextRecords,
     };
 
-    setSpecLedgers(prev => ({
-      ...prev,
-      [targetProjectId]: nextLedger,
-    }));
-
     const handle = activeLedgerHandleRef.current || await getSavedLedgerHandleForProject(targetProjectId);
-    if (handle) {
-      try {
-        await writeLedgerToHandle(handle, nextLedger, { allowPromptRequest: true });
-        setProjects(prev => prev.map(p => p.id === targetProjectId ? {
-          ...p,
-          linkedLedgerLastSync: new Date().toLocaleTimeString('ja-JP'),
-          needsLedgerPermission: false,
-          isLedgerLinkError: false,
-          ledgerErrorMessage: undefined,
-        } : p));
-      } catch (err) {
-        console.warn('Failed to persist deleted ledger record to disk', err);
-      }
+    if (!handle) {
+      setSpecLedgers(prev => ({ ...prev, [targetProjectId]: nextLedger }));
+      return;
     }
+
+    isBusySyncingOrWritingRef.current = true;
+    try {
+      const ledgerBase = ledgerBaseStateRef.current[targetProjectId];
+      const diskMtime = await getFileHandleLastModified(handle);
+      let finalRecords = nextRecords;
+
+      if (ledgerBase && hasMtimeChanged(diskMtime, ledgerBase.lastModified)) {
+        const latestDisk = await readLedgerFromHandle(handle, targetProjectId, prj, {
+          allowPromptRequest: true,
+        });
+        if (hasMtimeChanged(latestDisk.lastModified, ledgerBase.lastModified)) {
+          const mergeRes = mergeLedgerRecords(ledgerBase.records, latestDisk.ledger.records, nextRecords);
+          if (mergeRes.conflicts.length > 0) {
+            isBusySyncingOrWritingRef.current = false;
+            setConflictModalState({
+              isOpen: true,
+              type: 'ledger',
+              projectId: targetProjectId,
+              fileName: latestDisk.fileName,
+              autoMergedInfoText: '削除操作と他ユーザーの台帳更新が競合しています。',
+              ledger: {
+                autoMergedRecords: mergeRes.mergedRecords,
+                conflicts: mergeRes.conflicts,
+                diskLastModified: latestDisk.lastModified,
+                saveAfterResolve: true,
+              },
+            });
+            return;
+          }
+          finalRecords = mergeRes.mergedRecords;
+        }
+      }
+
+      const finalLedger: SpecLedgerFile = { ...nextLedger, records: finalRecords };
+      const newMtime = await writeLedgerToHandle(handle, finalLedger, { allowPromptRequest: true });
+      setSpecLedgers(prev => ({ ...prev, [targetProjectId]: finalLedger }));
+      setLedgerBaseSnapshot(targetProjectId, finalRecords, newMtime);
+      clearRemoteUpdateFlag(targetProjectId, 'ledger');
+      setProjects(prev => prev.map(p => p.id === targetProjectId ? {
+        ...p,
+        linkedLedgerLastSync: new Date().toLocaleTimeString('ja-JP'),
+        needsLedgerPermission: false,
+        isLedgerLinkError: false,
+        ledgerErrorMessage: undefined,
+      } : p));
+    } catch (err) {
+      setSpecLedgers(prev => ({ ...prev, [targetProjectId]: nextLedger }));
+      console.warn('Failed to persist deleted ledger record to disk', err);
+    } finally {
+      isBusySyncingOrWritingRef.current = false;
+    }
+  };
+
+  // Resolve conflicts selected in ConflictResolutionModal
+  const handleResolveConflictModal = async (resolutions: Record<string, ConflictChoice>) => {
+    const targetProjectId = conflictModalState.projectId;
+    if (!targetProjectId) return;
+
+    setConflictModalState(prev => ({ ...prev, isResolving: true }));
+    isBusySyncingOrWritingRef.current = true;
+
+    try {
+      if (conflictModalState.type === 'equipment' && conflictModalState.equipment) {
+        const eq = conflictModalState.equipment;
+        const resolvedProjectItems = applyEquipmentConflictResolutions(
+          eq.autoMergedItems,
+          eq.conflicts,
+          resolutions
+        );
+        const targetCats =
+          eq.autoMergedCategories.length > 0
+            ? eq.autoMergedCategories
+            : categoriesRef.current.filter(c => c.projectId === targetProjectId);
+
+        setItems(prev => {
+          const otherItems = prev.filter(it => it.projectId !== targetProjectId);
+          const nextAll = [...otherItems, ...resolvedProjectItems];
+          itemsRef.current = nextAll;
+          return nextAll;
+        });
+        setCategories(prev => {
+          const otherCats = prev.filter(c => c.projectId && c.projectId !== targetProjectId);
+          const nextCatsAll = [...otherCats, ...targetCats];
+          categoriesRef.current = nextCatsAll;
+          return nextCatsAll;
+        });
+
+        let handle = targetProjectId === activeProjectId ? activeFileHandleRef.current : null;
+        if (!handle) handle = await getSavedFileHandleForProject(targetProjectId);
+
+        if (handle) {
+          const prj = projectsRef.current.find(p => p.id === targetProjectId) || currentProject;
+          const effectiveSchemaType = eq.diskSchemaType || prj?.schemaType;
+          const effectiveRawDocument = eq.diskRawDocument || prj?.rawDocument;
+          const payload: DatabasePayload = {
+            version: effectiveSchemaType === 'tokki-equipment' ? '1.1' : '2.0',
+            lastUpdated: new Date().toISOString(),
+            items: resolvedProjectItems,
+            categories: targetCats,
+            templates: templatesRef.current,
+            schemaType: effectiveSchemaType,
+            rawDocument: effectiveRawDocument,
+          };
+
+          const newMtime = await writeToProjectHandle(handle, payload, effectiveSchemaType, prj, {
+            allowPromptRequest: true,
+          });
+          setDbBaseSnapshot(targetProjectId, resolvedProjectItems, targetCats, newMtime);
+          clearRemoteUpdateFlag(targetProjectId, 'db');
+
+          const nowStr = new Date().toLocaleTimeString('ja-JP');
+          setProjects(prev => prev.map(p => p.id === targetProjectId ? {
+            ...p,
+            schemaType: effectiveSchemaType || p.schemaType,
+            rawDocument: effectiveRawDocument || p.rawDocument,
+            linkedJsonLastSync: nowStr,
+            needsLinkPermission: false,
+            isLinkError: false,
+            linkErrorMessage: undefined,
+          } : p));
+        }
+
+        setHasUnsavedChanges(false);
+        setConflictModalState({ isOpen: false, type: 'equipment', projectId: '' });
+        setSyncNotice('競合箇所を解決し、最新JSONファイルへ安全にマージ保存しました。');
+        setTimeout(() => setSyncNotice(''), 6000);
+      } else if (conflictModalState.type === 'ledger' && conflictModalState.ledger) {
+        const ld = conflictModalState.ledger;
+        const resolvedRecords = applyLedgerConflictResolutions(
+          ld.autoMergedRecords,
+          ld.conflicts,
+          resolutions
+        );
+        const prj = projectsRef.current.find(p => p.id === targetProjectId) || currentProject;
+        const baseLedger = specLedgersRef.current[targetProjectId]
+          ? normalizeLedgerJson(specLedgersRef.current[targetProjectId], targetProjectId, prj)
+          : createEmptyLedgerPayload(prj, targetProjectId);
+
+        const resolvedLedger: SpecLedgerFile = {
+          ...baseLedger,
+          projectOrderNo: prj?.orderNo || baseLedger.projectOrderNo,
+          projectCode: prj?.code || baseLedger.projectCode,
+          projectName: prj?.name || baseLedger.projectName,
+          lastUpdated: new Date().toISOString(),
+          records: resolvedRecords,
+        };
+
+        let ledgerHandle = targetProjectId === activeProjectId ? activeLedgerHandleRef.current : null;
+        if (!ledgerHandle) ledgerHandle = await getSavedLedgerHandleForProject(targetProjectId);
+
+        if (ledgerHandle) {
+          const newMtime = await writeLedgerToHandle(ledgerHandle, resolvedLedger, {
+            allowPromptRequest: true,
+          });
+          setLedgerBaseSnapshot(targetProjectId, resolvedRecords, newMtime);
+          clearRemoteUpdateFlag(targetProjectId, 'ledger');
+
+          const nowStr = new Date().toLocaleTimeString('ja-JP');
+          setProjects(prev => prev.map(p => p.id === targetProjectId ? {
+            ...p,
+            linkedLedgerLastSync: nowStr,
+            needsLedgerPermission: false,
+            isLedgerLinkError: false,
+            ledgerErrorMessage: undefined,
+          } : p));
+        }
+
+        setSpecLedgers(prev => ({
+          ...prev,
+          [targetProjectId]: resolvedLedger,
+        }));
+        ld.pendingResolve?.({ savedToDisk: Boolean(ledgerHandle) });
+        setConflictModalState({ isOpen: false, type: 'ledger', projectId: '' });
+        setSyncNotice('発行台帳JSONの競合を解決し、マージ保存しました。');
+        setTimeout(() => setSyncNotice(''), 6000);
+      }
+    } catch (err: any) {
+      alert(`マージ保存に失敗しました: ${err.message || 'エラーが発生しました'}`);
+      setConflictModalState(prev => ({ ...prev, isResolving: false }));
+    } finally {
+      isBusySyncingOrWritingRef.current = false;
+    }
+  };
+
+  const handleCancelConflictModal = () => {
+    if (conflictModalState.type === 'ledger' && conflictModalState.ledger?.pendingResolve) {
+      conflictModalState.ledger.pendingResolve({ savedToDisk: false });
+    }
+    setConflictModalState({ isOpen: false, type: 'equipment', projectId: '' });
   };
 
   // Delete project registration from UI state & browser storage only (NEVER touch or delete the JSON file on disk!)
@@ -1447,14 +2524,14 @@ export default function App() {
 
   // Reorder items in current project (drag & drop)
   const handleReorderItems = (reorderedProjectItems: EquipmentItem[]) => {
-    setItems(prev => {
-      const otherItems = prev.filter(it => it.projectId !== activeProjectId);
-      const resequenced = resequenceProjectItems(reorderedProjectItems);
-      const nextList = [...resequenced, ...otherItems];
-      persistItemsToLinkedJson(activeProjectId, resequenced);
-      return nextList;
-    });
+    const targetProjectId = activeProjectId;
+    const otherItems = itemsRef.current.filter(it => it.projectId !== targetProjectId);
+    const resequenced = resequenceProjectItems(reorderedProjectItems);
+    const nextList = [...resequenced, ...otherItems];
+    itemsRef.current = nextList;
+    setItems(nextList);
     setHasUnsavedChanges(true);
+    void persistItemsToLinkedJson(targetProjectId, resequenced);
   };
 
   // Intercept project switch if unsaved changes exist
@@ -1492,71 +2569,74 @@ export default function App() {
   const handleAddCategory = (name: string) => {
     const trimmed = name.trim();
     if (!trimmed) return;
+    const targetProjectId = activeProjectId;
     const newCat: Category = {
-      id: `cat-${activeProjectId}-${Date.now()}`,
-      projectId: activeProjectId,
+      id: `cat-${targetProjectId}-${Date.now()}`,
+      projectId: targetProjectId,
       name: trimmed
     };
-    const nextCats = [...categories, newCat];
+    const nextCats = [...categoriesRef.current, newCat];
+    categoriesRef.current = nextCats;
     setCategories(nextCats);
     setHasUnsavedChanges(true);
 
     // Save updated categories to linked JSON
-    const projectItems = items.filter(it => it.projectId === activeProjectId);
-    const updatedProjectCats = nextCats.filter(c => c.projectId === activeProjectId);
-    persistItemsToLinkedJson(activeProjectId, projectItems, updatedProjectCats);
+    const projectItems = itemsRef.current.filter(it => it.projectId === targetProjectId);
+    const updatedProjectCats = nextCats.filter(c => c.projectId === targetProjectId);
+    void persistItemsToLinkedJson(targetProjectId, projectItems, updatedProjectCats);
   };
 
   const handleDeleteCategory = (categoryId: string) => {
     if (projectCategories.length <= 1) return;
+    const targetProjectId = activeProjectId;
     const fallbackId = projectCategories.find(c => c.id !== categoryId)?.id || projectCategories[0].id;
-    const nextItems = items.map(it => it.projectId === activeProjectId && it.categoryId === categoryId ? { ...it, categoryId: fallbackId } : it);
-    const nextCats = categories.filter(c => c.id !== categoryId);
+    const nextItems = itemsRef.current.map(it => it.projectId === targetProjectId && it.categoryId === categoryId ? { ...it, categoryId: fallbackId } : it);
+    const nextCats = categoriesRef.current.filter(c => c.id !== categoryId);
+    itemsRef.current = nextItems;
+    categoriesRef.current = nextCats;
     setItems(nextItems);
     setCategories(nextCats);
     setHasUnsavedChanges(true);
 
     // Save updated categories and re-assigned items to linked JSON
-    const projectItems = nextItems.filter(it => it.projectId === activeProjectId);
-    const updatedProjectCats = nextCats.filter(c => c.projectId === activeProjectId);
-    persistItemsToLinkedJson(activeProjectId, projectItems, updatedProjectCats);
+    const projectItems = nextItems.filter(it => it.projectId === targetProjectId);
+    const updatedProjectCats = nextCats.filter(c => c.projectId === targetProjectId);
+    void persistItemsToLinkedJson(targetProjectId, projectItems, updatedProjectCats);
   };
 
   const handleMoveItemToCategory = (itemId: string, targetCategoryId: string) => {
-    setItems(prev => {
-      const nextList = prev.map(it => {
-        if (it.projectId === activeProjectId && it.id === itemId) {
-          const oldCatName = projectCategories.find(c => c.id === it.categoryId)?.name || '未分類';
-          const newCatName = projectCategories.find(c => c.id === targetCategoryId)?.name || '未分類';
-          const nowStr = new Date().toLocaleString('ja-JP', { hour12: false });
-          const catLog: ChangeLog = {
-            id: `hist-${Date.now()}`,
-            itemId,
-            timestamp: nowStr,
-            author: '手動移動',
-            field: 'category',
-            fieldLabel: '所属カテゴリ',
-            oldValue: oldCatName,
-            newValue: newCatName,
-            reason: 'ドラッグ＆ドロップによるカテゴリ分類変更'
-          };
-          return {
-            ...it,
-            categoryId: targetCategoryId,
-            history: [catLog, ...(it.history || [])],
-            updatedAt: nowStr.slice(0, 10)
-          };
-        }
-        return it;
-      });
-
-      // Write updated equipment list & category mappings to linked JSON
-      const projectItems = nextList.filter(it => it.projectId === activeProjectId);
-      persistItemsToLinkedJson(activeProjectId, projectItems);
-
-      return nextList;
+    const targetProjectId = activeProjectId;
+    const nextList = itemsRef.current.map(it => {
+      if (it.projectId === targetProjectId && it.id === itemId) {
+        const oldCatName = projectCategories.find(c => c.id === it.categoryId)?.name || '未分類';
+        const newCatName = projectCategories.find(c => c.id === targetCategoryId)?.name || '未分類';
+        const nowStr = new Date().toLocaleString('ja-JP', { hour12: false });
+        const catLog: ChangeLog = {
+          id: `hist-${Date.now()}`,
+          itemId,
+          timestamp: nowStr,
+          author: '手動移動',
+          field: 'category',
+          fieldLabel: '所属カテゴリ',
+          oldValue: oldCatName,
+          newValue: newCatName,
+          reason: 'ドラッグ＆ドロップによるカテゴリ分類変更'
+        };
+        return {
+          ...it,
+          categoryId: targetCategoryId,
+          history: [catLog, ...(it.history || [])],
+          updatedAt: nowStr.slice(0, 10)
+        };
+      }
+      return it;
     });
+
+    itemsRef.current = nextList;
+    setItems(nextList);
     setHasUnsavedChanges(true);
+    const projectItems = nextList.filter(it => it.projectId === targetProjectId);
+    void persistItemsToLinkedJson(targetProjectId, projectItems);
   };
 
   // Batch update delivery dates across multiple items (strictly scoped to activeProjectId)
@@ -1564,40 +2644,39 @@ export default function App() {
     if (!itemIds.length) return;
     const targetProjectId = activeProjectId;
     const nowStr = new Date().toLocaleString('ja-JP', { hour12: false });
-    const targetCount = items.filter(it => it.projectId === targetProjectId && itemIds.includes(it.id)).length;
+    const targetCount = itemsRef.current.filter(it => it.projectId === targetProjectId && itemIds.includes(it.id)).length;
     if (targetCount === 0) return;
 
-    setItems(prev => {
-      const nextList = prev.map(it => {
-        if (it.projectId === targetProjectId && itemIds.includes(it.id)) {
-          const oldDate = it.deliveryDate || '-';
-          const dateLog: ChangeLog = {
-            id: `hist-deliv-${Date.now()}-${it.id.slice(-4)}`,
-            itemId: it.id,
-            timestamp: nowStr,
-            author: '一括変更',
-            field: 'deliveryDate',
-            fieldLabel: '納入時期',
-            oldValue: oldDate,
-            newValue: newDeliveryDate,
-            reason: `納入時期の一括更新 (${targetCount}件)`
-          };
-          return {
-            ...it,
-            deliveryDate: newDeliveryDate,
-            history: [dateLog, ...(it.history || [])],
-            updatedAt: nowStr.slice(0, 10)
-          };
-        }
-        return it;
-      });
-
-      const projectItems = nextList.filter(it => it.projectId === targetProjectId);
-      persistItemsToLinkedJson(targetProjectId, projectItems);
-      return nextList;
+    const nextList = itemsRef.current.map(it => {
+      if (it.projectId === targetProjectId && itemIds.includes(it.id)) {
+        const oldDate = it.deliveryDate || '-';
+        const dateLog: ChangeLog = {
+          id: `hist-deliv-${Date.now()}-${it.id.slice(-4)}`,
+          itemId: it.id,
+          timestamp: nowStr,
+          author: '一括変更',
+          field: 'deliveryDate',
+          fieldLabel: '納入時期',
+          oldValue: oldDate,
+          newValue: newDeliveryDate,
+          reason: `納入時期の一括更新 (${targetCount}件)`
+        };
+        return {
+          ...it,
+          deliveryDate: newDeliveryDate,
+          history: [dateLog, ...(it.history || [])],
+          updatedAt: nowStr.slice(0, 10)
+        };
+      }
+      return it;
     });
 
+    itemsRef.current = nextList;
+    setItems(nextList);
     setHasUnsavedChanges(true);
+    const projectItems = nextList.filter(it => it.projectId === targetProjectId);
+    void persistItemsToLinkedJson(targetProjectId, projectItems);
+
     setSyncNotice(`${targetCount}件の納入時期を「${newDeliveryDate}」へ一括変更しました。`);
     setTimeout(() => setSyncNotice(''), 5000);
   };
@@ -1608,41 +2687,40 @@ export default function App() {
     const targetProjectId = activeProjectId;
     const nowStr = new Date().toLocaleString('ja-JP', { hour12: false });
     const formattedType = normalizeEquipmentType(newEquipmentType, 'PA');
-    const targetCount = items.filter(it => it.projectId === targetProjectId && itemIds.includes(it.id)).length;
+    const targetCount = itemsRef.current.filter(it => it.projectId === targetProjectId && itemIds.includes(it.id)).length;
     if (targetCount === 0) return;
 
-    setItems(prev => {
-      const nextList = prev.map(it => {
-        if (it.projectId === targetProjectId && itemIds.includes(it.id)) {
-          const oldType = it.equipmentType || 'PA';
-          const typeLog: ChangeLog = {
-            id: `hist-type-${Date.now()}-${it.id.slice(-4)}`,
-            itemId: it.id,
-            timestamp: nowStr,
-            author: '一括変更',
-            field: 'equipmentType',
-            fieldLabel: '機器種別',
-            oldValue: oldType,
-            newValue: formattedType,
-            reason: `機器種別の一括更新 (${targetCount}件)`
-          };
-          return {
-            ...it,
-            equipmentType: formattedType,
-            ...(it.rawTokki ? { rawTokki: { ...it.rawTokki, equipment_type: formattedType } } : {}),
-            history: [typeLog, ...(it.history || [])],
-            updatedAt: nowStr.slice(0, 10)
-          };
-        }
-        return it;
-      });
-
-      const projectItems = nextList.filter(it => it.projectId === targetProjectId);
-      persistItemsToLinkedJson(targetProjectId, projectItems);
-      return nextList;
+    const nextList = itemsRef.current.map(it => {
+      if (it.projectId === targetProjectId && itemIds.includes(it.id)) {
+        const oldType = it.equipmentType || 'PA';
+        const typeLog: ChangeLog = {
+          id: `hist-type-${Date.now()}-${it.id.slice(-4)}`,
+          itemId: it.id,
+          timestamp: nowStr,
+          author: '一括変更',
+          field: 'equipmentType',
+          fieldLabel: '機器種別',
+          oldValue: oldType,
+          newValue: formattedType,
+          reason: `機器種別の一括更新 (${targetCount}件)`
+        };
+        return {
+          ...it,
+          equipmentType: formattedType,
+          ...(it.rawTokki ? { rawTokki: { ...it.rawTokki, equipment_type: formattedType } } : {}),
+          history: [typeLog, ...(it.history || [])],
+          updatedAt: nowStr.slice(0, 10)
+        };
+      }
+      return it;
     });
 
+    itemsRef.current = nextList;
+    setItems(nextList);
     setHasUnsavedChanges(true);
+    const projectItems = nextList.filter(it => it.projectId === targetProjectId);
+    void persistItemsToLinkedJson(targetProjectId, projectItems);
+
     setSyncNotice(`${targetCount}件の機器種別を「${formattedType}」へ一括変更しました。`);
     setTimeout(() => setSyncNotice(''), 5000);
   };
@@ -1654,40 +2732,39 @@ export default function App() {
     const targetCat = projectCategories.find(c => c.id === targetCategoryId);
     const targetCatName = targetCat?.name || '未分類';
     const nowStr = new Date().toLocaleString('ja-JP', { hour12: false });
-    const targetCount = items.filter(it => it.projectId === targetProjectId && itemIds.includes(it.id)).length;
+    const targetCount = itemsRef.current.filter(it => it.projectId === targetProjectId && itemIds.includes(it.id)).length;
     if (targetCount === 0) return;
 
-    setItems(prev => {
-      const nextList = prev.map(it => {
-        if (it.projectId === targetProjectId && itemIds.includes(it.id)) {
-          const oldCatName = projectCategories.find(c => c.id === it.categoryId)?.name || '未分類';
-          const catLog: ChangeLog = {
-            id: `hist-cat-${Date.now()}-${it.id.slice(-4)}`,
-            itemId: it.id,
-            timestamp: nowStr,
-            author: '一括移動',
-            field: 'category',
-            fieldLabel: '所属カテゴリ',
-            oldValue: oldCatName,
-            newValue: targetCatName,
-            reason: `一括カテゴリ分類変更 (${targetCount}件)`
-          };
-          return {
-            ...it,
-            categoryId: targetCategoryId,
-            history: [catLog, ...(it.history || [])],
-            updatedAt: nowStr.slice(0, 10)
-          };
-        }
-        return it;
-      });
-
-      const projectItems = nextList.filter(it => it.projectId === targetProjectId);
-      persistItemsToLinkedJson(targetProjectId, projectItems);
-      return nextList;
+    const nextList = itemsRef.current.map(it => {
+      if (it.projectId === targetProjectId && itemIds.includes(it.id)) {
+        const oldCatName = projectCategories.find(c => c.id === it.categoryId)?.name || '未分類';
+        const catLog: ChangeLog = {
+          id: `hist-cat-${Date.now()}-${it.id.slice(-4)}`,
+          itemId: it.id,
+          timestamp: nowStr,
+          author: '一括移動',
+          field: 'category',
+          fieldLabel: '所属カテゴリ',
+          oldValue: oldCatName,
+          newValue: targetCatName,
+          reason: `一括カテゴリ分類変更 (${targetCount}件)`
+        };
+        return {
+          ...it,
+          categoryId: targetCategoryId,
+          history: [catLog, ...(it.history || [])],
+          updatedAt: nowStr.slice(0, 10)
+        };
+      }
+      return it;
     });
 
+    itemsRef.current = nextList;
+    setItems(nextList);
     setHasUnsavedChanges(true);
+    const projectItems = nextList.filter(it => it.projectId === targetProjectId);
+    void persistItemsToLinkedJson(targetProjectId, projectItems);
+
     setSyncNotice(`${targetCount}件の機器を「${targetCatName}」へ一括移動しました。`);
     setTimeout(() => setSyncNotice(''), 5000);
   };
@@ -1698,40 +2775,39 @@ export default function App() {
     const targetProjectId = activeProjectId;
     const nowStr = new Date().toLocaleString('ja-JP', { hour12: false });
     const statusText = isIssued ? '済' : '未';
-    const targetCount = items.filter(it => it.projectId === targetProjectId && itemIds.includes(it.id)).length;
+    const targetCount = itemsRef.current.filter(it => it.projectId === targetProjectId && itemIds.includes(it.id)).length;
     if (targetCount === 0) return;
 
-    setItems(prev => {
-      const nextList = prev.map(it => {
-        if (it.projectId === targetProjectId && itemIds.includes(it.id)) {
-          const oldStatus = it.isIssued ? '済' : '未';
-          const issueLog: ChangeLog = {
-            id: `hist-issue-${Date.now()}-${it.id.slice(-4)}`,
-            itemId: it.id,
-            timestamp: nowStr,
-            author: '設計担当',
-            field: 'isIssued',
-            fieldLabel: '仕様書発行状態',
-            oldValue: oldStatus,
-            newValue: statusText,
-            reason: `発行状態の更新 (${statusText})`
-          };
-          return {
-            ...it,
-            isIssued,
-            history: [issueLog, ...(it.history || [])],
-            updatedAt: nowStr.slice(0, 10)
-          };
-        }
-        return it;
-      });
-
-      const projectItems = nextList.filter(it => it.projectId === targetProjectId);
-      persistItemsToLinkedJson(targetProjectId, projectItems);
-      return nextList;
+    const nextList = itemsRef.current.map(it => {
+      if (it.projectId === targetProjectId && itemIds.includes(it.id)) {
+        const oldStatus = it.isIssued ? '済' : '未';
+        const issueLog: ChangeLog = {
+          id: `hist-issue-${Date.now()}-${it.id.slice(-4)}`,
+          itemId: it.id,
+          timestamp: nowStr,
+          author: '設計担当',
+          field: 'isIssued',
+          fieldLabel: '仕様書発行状態',
+          oldValue: oldStatus,
+          newValue: statusText,
+          reason: `発行状態の更新 (${statusText})`
+        };
+        return {
+          ...it,
+          isIssued,
+          history: [issueLog, ...(it.history || [])],
+          updatedAt: nowStr.slice(0, 10)
+        };
+      }
+      return it;
     });
 
+    itemsRef.current = nextList;
+    setItems(nextList);
     setHasUnsavedChanges(true);
+    const projectItems = nextList.filter(it => it.projectId === targetProjectId);
+    void persistItemsToLinkedJson(targetProjectId, projectItems);
+
     setSyncNotice(`${targetCount}件の発行状態を「${statusText}」へ更新しました。`);
     setTimeout(() => setSyncNotice(''), 5000);
   };
@@ -1750,25 +2826,25 @@ export default function App() {
     targetClassification?: EquipmentClassification,
     targetSeq?: number
   ) => {
-    setItems(prev => {
-      const currentProjectItems = prev.filter(it => it.projectId === activeProjectId);
-      const otherItems = prev.filter(it => it.projectId !== activeProjectId);
+    const targetProjectId = activeProjectId;
+    const currentProjectItems = itemsRef.current.filter(it => it.projectId === targetProjectId);
+    const otherItems = itemsRef.current.filter(it => it.projectId !== targetProjectId);
 
-      const cls = targetClassification || newItem.classification || '03';
-      const seq = targetSeq || (currentProjectItems.filter(it => (it.classification || '03') === cls).length + 1);
+    const cls = targetClassification || newItem.classification || '03';
+    const seq = targetSeq || (currentProjectItems.filter(it => (it.classification || '03') === cls).length + 1);
 
-      const resequencedProject = placeItemWithResequence(
-        currentProjectItems,
-        newItem,
-        cls,
-        seq
-      );
+    const resequencedProject = placeItemWithResequence(
+      currentProjectItems,
+      newItem,
+      cls,
+      seq
+    );
 
-      const nextList = [...resequencedProject, ...otherItems];
-      persistItemsToLinkedJson(activeProjectId, resequencedProject);
-      return nextList;
-    });
+    const nextList = [...resequencedProject, ...otherItems];
+    itemsRef.current = nextList;
+    setItems(nextList);
     setHasUnsavedChanges(true);
+    void persistItemsToLinkedJson(targetProjectId, resequencedProject);
   };
 
   const handleEditItem = (item: EquipmentItem) => {
@@ -1782,49 +2858,50 @@ export default function App() {
     targetSeq?: number,
     originalId?: string
   ) => {
-    setItems(prev => {
-      const currentProjectItems = prev.filter(it => it.projectId === activeProjectId);
-      const otherItems = prev.filter(it => it.projectId !== activeProjectId);
+    const targetProjectId = activeProjectId;
+    const currentProjectItems = itemsRef.current.filter(it => it.projectId === targetProjectId);
+    const otherItems = itemsRef.current.filter(it => it.projectId !== targetProjectId);
 
-      const cls = targetClassification || updatedItem.classification || '03';
-      const seq = targetSeq || 1;
+    const cls = targetClassification || updatedItem.classification || '03';
+    const seq = targetSeq || 1;
 
-      const eqType = normalizeEquipmentType(updatedItem.equipmentType, 'PA');
-      const normalizedUpdatedItem: EquipmentItem = {
-        ...updatedItem,
-        equipmentType: eqType,
-        ...(updatedItem.rawTokki ? { rawTokki: { ...updatedItem.rawTokki, equipment_type: eqType } } : {})
-      };
+    const eqType = normalizeEquipmentType(updatedItem.equipmentType, 'PA');
+    const normalizedUpdatedItem: EquipmentItem = {
+      ...updatedItem,
+      equipmentType: eqType,
+      ...(updatedItem.rawTokki ? { rawTokki: { ...updatedItem.rawTokki, equipment_type: eqType } } : {})
+    };
 
-      const resequencedProject = placeItemWithResequence(
-        currentProjectItems,
-        normalizedUpdatedItem,
-        cls,
-        seq,
-        originalId
-      );
+    const resequencedProject = placeItemWithResequence(
+      currentProjectItems,
+      normalizedUpdatedItem,
+      cls,
+      seq,
+      originalId
+    );
 
-      const nextList = [...resequencedProject, ...otherItems];
-      persistItemsToLinkedJson(activeProjectId, resequencedProject);
-      return nextList;
-    });
+    const nextList = [...resequencedProject, ...otherItems];
+    itemsRef.current = nextList;
+    setItems(nextList);
     setHasUnsavedChanges(true);
+    void persistItemsToLinkedJson(targetProjectId, resequencedProject);
   };
 
   const handleDeleteItem = (itemId: string, skipConfirm: boolean = false) => {
-    const targetItem = items.find(it => it.projectId === activeProjectId && it.id === itemId);
+    const targetProjectId = activeProjectId;
+    const targetItem = itemsRef.current.find(it => it.projectId === targetProjectId && it.id === itemId);
     const itemName = targetItem ? `${targetItem.name} (${targetItem.tagNo || '-'})` : 'この機器';
     if (skipConfirm || window.confirm(`機器「${itemName}」を削除してもよろしいですか？`)) {
-      setItems(prev => {
-        const remainingProject = prev.filter(it => it.projectId === activeProjectId && it.id !== itemId);
-        const otherItems = prev.filter(it => it.projectId !== activeProjectId);
-        const resequencedProject = resequenceProjectItems(remainingProject);
-        const nextList = [...resequencedProject, ...otherItems];
-        persistItemsToLinkedJson(activeProjectId, resequencedProject);
-        return nextList;
-      });
+      const remainingProject = itemsRef.current.filter(it => it.projectId === targetProjectId && it.id !== itemId);
+      const otherItems = itemsRef.current.filter(it => it.projectId !== targetProjectId);
+      const resequencedProject = resequenceProjectItems(remainingProject);
+      const nextList = [...resequencedProject, ...otherItems];
+      itemsRef.current = nextList;
+      setItems(nextList);
       setHasUnsavedChanges(true);
-      if (editingItem && editingItem.id === itemId && editingItem.projectId === activeProjectId) {
+      void persistItemsToLinkedJson(targetProjectId, resequencedProject);
+
+      if (editingItem && editingItem.id === itemId && editingItem.projectId === targetProjectId) {
         setIsEditModalOpen(false);
         setEditingItem(null);
       }
@@ -1834,15 +2911,15 @@ export default function App() {
   const handleBatchDeleteItems = (itemIds: string[]) => {
     if (!itemIds.length) return;
     const targetProjectId = activeProjectId;
-    setItems(prev => {
-      const remainingProject = prev.filter(it => it.projectId === targetProjectId && !itemIds.includes(it.id));
-      const otherItems = prev.filter(it => it.projectId !== targetProjectId);
-      const resequencedProject = resequenceProjectItems(remainingProject);
-      const nextList = [...resequencedProject, ...otherItems];
-      persistItemsToLinkedJson(targetProjectId, resequencedProject);
-      return nextList;
-    });
+    const remainingProject = itemsRef.current.filter(it => it.projectId === targetProjectId && !itemIds.includes(it.id));
+    const otherItems = itemsRef.current.filter(it => it.projectId !== targetProjectId);
+    const resequencedProject = resequenceProjectItems(remainingProject);
+    const nextList = [...resequencedProject, ...otherItems];
+    itemsRef.current = nextList;
+    setItems(nextList);
     setHasUnsavedChanges(true);
+    void persistItemsToLinkedJson(targetProjectId, resequencedProject);
+
     if (editingItem && editingItem.projectId === targetProjectId && itemIds.includes(editingItem.id)) {
       setIsEditModalOpen(false);
       setEditingItem(null);
@@ -1852,24 +2929,24 @@ export default function App() {
   // Excel file upload for equipment list
   const handleUploadExcelEquipment = async (file: File) => {
     try {
-      const defaultCatId = projectCategories[0]?.id || `cat-${activeProjectId}-etc`;
-      const currentPrj = projects.find(p => p.id === activeProjectId);
-      const projectItems = items.filter(it => it.projectId === activeProjectId);
+      const targetProjectId = activeProjectId;
+      const defaultCatId = projectCategories[0]?.id || `cat-${targetProjectId}-etc`;
+      const currentPrj = projectsRef.current.find(p => p.id === targetProjectId);
+      const projectItems = itemsRef.current.filter(it => it.projectId === targetProjectId);
       const imported = await parseEquipmentExcel(
         file, 
-        activeProjectId, 
+        targetProjectId, 
         defaultCatId, 
         currentPrj?.code, 
         projectItems
       );
       if (imported.length > 0) {
-        setItems(prev => {
-          const nextList = [...imported, ...prev];
-          const projectItems = nextList.filter(it => it.projectId === activeProjectId);
-          persistItemsToLinkedJson(activeProjectId, projectItems);
-          return nextList;
-        });
+        const nextList = [...imported, ...itemsRef.current];
+        itemsRef.current = nextList;
+        setItems(nextList);
         setHasUnsavedChanges(true);
+        const updatedProjectItems = nextList.filter(it => it.projectId === targetProjectId);
+        void persistItemsToLinkedJson(targetProjectId, updatedProjectItems);
         alert(`Excelファイル「${file.name}」から ${imported.length} 件の機器を読み込み、登録しました。紐づけ先JSONにも反映されました。`);
       } else {
         alert('機器データを検出できませんでした。列ヘッダーに「機器名」「数量」「口径」「材質」「納期」が含まれているか確認してください。');
@@ -1908,7 +2985,7 @@ export default function App() {
         if (parsed.items) {
           if (parsed.projects) setProjects(parsed.projects);
           if (parsed.categories) setCategories(parsed.categories);
-          if (parsed.templates) setTemplates(parsed.templates);
+          if (parsed.templates) handleUpdateAllTemplates(parsed.templates);
           setItems(ensureItemEquipmentTypes(parsed.items));
           alert('プロジェクトデータベースを正常に復元しました。');
         } else {
@@ -2030,6 +3107,47 @@ export default function App() {
         </div>
       )}
 
+      {/* Remote External Update Notification Banner (Multi-User Concurrent Edit Protection) */}
+      {(remoteUpdates[activeProjectId]?.dbUpdated || remoteUpdates[activeProjectId]?.ledgerUpdated) && (
+        <div className="bg-emerald-700 text-white text-xs py-2.5 px-4 shadow-sm flex items-center justify-between transition-all">
+          <div className="flex items-center gap-2.5 max-w-7xl mx-auto w-full">
+            <GitMerge className="w-4 h-4 shrink-0 text-emerald-200" />
+            <div className="flex-1 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <span className="font-medium">
+                <strong className="font-bold">【他のユーザーがファイルを更新しました】</strong>
+                {remoteUpdates[activeProjectId]?.dbUpdated && remoteUpdates[activeProjectId]?.ledgerUpdated
+                  ? ' 機器データベースJSONと発行台帳JSONの両方が外部で更新されています。現在の編集内容を消さずに3-way自動マージで最新データを取り込めます。'
+                  : remoteUpdates[activeProjectId]?.dbUpdated
+                    ? ` 「${currentProject?.linkedJsonFileName || '機器DB JSON'}」が更新されています。現在の編集内容を保ったまま安全に自動マージできます。`
+                    : ` 「${currentProject?.linkedLedgerFileName || '発行台帳JSON'}」が更新されています。最新の仕様書履歴を取り込めます。`}
+              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                {remoteUpdates[activeProjectId]?.dbUpdated && (
+                  <button
+                    onClick={() => performSyncProject(activeProjectId, false)}
+                    disabled={isSyncing}
+                    className="px-3 py-1 bg-white hover:bg-emerald-50 text-emerald-900 font-bold rounded shadow-xs text-xs whitespace-nowrap flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                    <span>機器DBを安全に取り込む（自動マージ）</span>
+                  </button>
+                )}
+                {remoteUpdates[activeProjectId]?.ledgerUpdated && (
+                  <button
+                    onClick={() => handleSyncLedgerFile(activeProjectId)}
+                    disabled={isLedgerSyncing}
+                    className="px-3 py-1 bg-white hover:bg-emerald-50 text-emerald-900 font-bold rounded shadow-xs text-xs whitespace-nowrap flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLedgerSyncing ? 'animate-spin' : ''}`} />
+                    <span>発行台帳を取り込む（自動マージ）</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Auto-Sync Notification Banner */}
       {syncNotice && (
         <div className="bg-indigo-600 text-white text-xs py-2 px-4 shadow-xs flex items-center justify-between transition-all">
@@ -2083,12 +3201,17 @@ export default function App() {
             activeProjectId={activeProjectId}
             currentProject={currentProject}
             ledgerRecords={activeLedgerRecords}
+            templateFolderState={templateFolderState}
+            onReconnectTemplateFolder={handleSyncTemplateFolder}
             onConfirmIssuance={handleConfirmSpecIssuance}
             onCreateNewLedgerFile={handleCreateNewLedgerFile}
             onRelinkLedgerFile={handleRelinkLedgerFile}
             onReconnectLedgerFile={handleReconnectLedgerFile}
-            onOpenAdminMapping={() => setActiveTab('templates')}
-            onUpdateTemplates={setTemplates}
+            onOpenAdminMapping={(tplId) => {
+              setAdminInitialTemplateId(tplId);
+              handleTabChange('templates');
+            }}
+            onUpdateTemplates={handleUpdateAllTemplates}
           />
         )}
 
@@ -2103,24 +3226,37 @@ export default function App() {
             activeProjectId={activeProjectId}
             currentProject={currentProject}
             ledgerRecords={activeLedgerRecords}
+            templateFolderState={templateFolderState}
+            onReconnectTemplateFolder={handleSyncTemplateFolder}
             onConfirmIssuance={handleConfirmSpecIssuance}
             onDeleteLedgerRecord={handleDeleteLedgerRecord}
             onCreateNewLedgerFile={handleCreateNewLedgerFile}
             onRelinkLedgerFile={handleRelinkLedgerFile}
             onReconnectLedgerFile={handleReconnectLedgerFile}
-            onOpenAdminMapping={() => setActiveTab('templates')}
-            onUpdateTemplates={setTemplates}
+            onOpenAdminMapping={(tplId) => {
+              setAdminInitialTemplateId(tplId);
+              handleTabChange('templates');
+            }}
+            onUpdateTemplates={handleUpdateAllTemplates}
           />
         )}
 
-        {/* Tab 3: Template Administration */}
+        {/* Tab 3: Settings & Template Management */}
         {activeTab === 'templates' && (
           <TemplateAdminTab
             templates={templates}
-            onUpdateTemplates={setTemplates}
+            onUpdateTemplates={handleUpdateAllTemplates}
             items={items}
             currentProject={currentProject}
-            onBackToDashboard={() => setActiveTab(lastSpecTab)}
+            activeTemplateId={adminInitialTemplateId}
+            onBackToDashboard={() => handleTabChange(lastSpecTab)}
+            templateFolderState={templateFolderState}
+            isFolderSyncing={isFolderTemplateSyncing}
+            onSelectTemplateFolder={handleSelectTemplateFolder}
+            onImportTemplateFolderFiles={handleImportTemplateFolderFiles}
+            onSyncTemplateFolder={handleSyncTemplateFolder}
+            onClearTemplateFolder={handleClearTemplateFolder}
+            onSaveMappingToFolder={handleSaveTemplateMappingToFolder}
           />
         )}
 
@@ -2214,6 +3350,20 @@ export default function App() {
         isSaving={isSavingJson}
         reason={unsavedModalReason}
         targetProjectName={projects.find(p => p.id === pendingNextProjectId)?.name}
+      />
+
+      {/* Concurrent Edit Conflict Resolution Modal */}
+      <ConflictResolutionModal
+        isOpen={conflictModalState.isOpen}
+        conflictType={conflictModalState.type}
+        fileName={conflictModalState.fileName}
+        projectName={projects.find(p => p.id === conflictModalState.projectId)?.name || currentProject?.name}
+        equipmentConflicts={conflictModalState.equipment?.conflicts}
+        ledgerConflicts={conflictModalState.ledger?.conflicts}
+        autoMergedInfoText={conflictModalState.autoMergedInfoText}
+        isSaving={Boolean(conflictModalState.isResolving)}
+        onCancel={handleCancelConflictModal}
+        onResolve={handleResolveConflictModal}
       />
 
       {/* Footer */}

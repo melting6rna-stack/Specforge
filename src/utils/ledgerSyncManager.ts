@@ -105,24 +105,46 @@ export function normalizeLedgerJson(
 
   const records: SpecIssuanceRecord[] = rawRecords
     .filter((r: any) => r && typeof r === 'object')
-    .map((r: any, idx: number) => ({
-      id: String(r.id || `spec-${Date.now()}-${idx}`),
-      projectId,
-      title: String(r.title || (Array.isArray(r.itemTagNos) ? r.itemTagNos[0] : '') || r.docNo || `仕様書-${idx + 1}`),
-      docNo: String(r.docNo || ''),
-      templateId: String(r.templateId || ''),
-      templateName: String(r.templateName || ''),
-      orderedItemIds: Array.isArray(r.orderedItemIds) ? r.orderedItemIds.map(String) : [],
-      primaryItemId: String(r.primaryItemId || (Array.isArray(r.orderedItemIds) ? r.orderedItemIds[0] : '') || ''),
-      itemTagNos: Array.isArray(r.itemTagNos) ? r.itemTagNos.map(String) : [],
-      itemNames: Array.isArray(r.itemNames) ? r.itemNames.map(String) : [],
-      currentRevision: (Number(r.currentRevision) >= 0 && Number(r.currentRevision) <= 3
-        ? Number(r.currentRevision)
-        : 0) as 0 | 1 | 2 | 3,
-      revisions: Array.isArray(r.revisions) ? r.revisions : [],
-      createdAt: String(r.createdAt || new Date().toISOString()),
-      updatedAt: String(r.updatedAt || r.createdAt || new Date().toISOString()),
-    }));
+    .map((r: any, idx: number) => {
+      const normalizedRevisions = Array.isArray(r.revisions)
+        ? r.revisions.map((s: any) => ({
+            ...s,
+            templateCode: s?.templateCode || r.templateCode || undefined,
+            templateSource: s?.templateSource || r.templateSource || undefined,
+            templateExcelFileName: s?.templateExcelFileName || r.templateExcelFileName || undefined,
+            templateMappingFileName: s?.templateMappingFileName || r.templateMappingFileName || undefined,
+            templateFolderName: s?.templateFolderName || r.templateFolderName || undefined,
+          }))
+        : [];
+      const latestSnap =
+        normalizedRevisions.length > 0
+          ? normalizedRevisions[normalizedRevisions.length - 1]
+          : undefined;
+
+      return {
+        id: String(r.id || `spec-${Date.now()}-${idx}`),
+        projectId,
+        title: String(r.title || (Array.isArray(r.itemTagNos) ? r.itemTagNos[0] : '') || r.docNo || `仕様書-${idx + 1}`),
+        docNo: String(r.docNo || ''),
+        templateId: String(r.templateId || latestSnap?.templateId || ''),
+        templateName: String(r.templateName || latestSnap?.templateName || ''),
+        templateCode: r.templateCode || latestSnap?.templateCode || undefined,
+        templateSource: r.templateSource || latestSnap?.templateSource || undefined,
+        templateExcelFileName: r.templateExcelFileName || latestSnap?.templateExcelFileName || undefined,
+        templateMappingFileName: r.templateMappingFileName || latestSnap?.templateMappingFileName || undefined,
+        templateFolderName: r.templateFolderName || latestSnap?.templateFolderName || undefined,
+        orderedItemIds: Array.isArray(r.orderedItemIds) ? r.orderedItemIds.map(String) : [],
+        primaryItemId: String(r.primaryItemId || (Array.isArray(r.orderedItemIds) ? r.orderedItemIds[0] : '') || ''),
+        itemTagNos: Array.isArray(r.itemTagNos) ? r.itemTagNos.map(String) : [],
+        itemNames: Array.isArray(r.itemNames) ? r.itemNames.map(String) : [],
+        currentRevision: (Number(r.currentRevision) >= 0 && Number(r.currentRevision) <= 3
+          ? Number(r.currentRevision)
+          : 0) as 0 | 1 | 2 | 3,
+        revisions: normalizedRevisions,
+        createdAt: String(r.createdAt || new Date().toISOString()),
+        updatedAt: String(r.updatedAt || r.createdAt || new Date().toISOString()),
+      };
+    });
 
   return {
     schemaType: 'specforge-issuance-ledger',
@@ -141,7 +163,7 @@ export async function readLedgerFromHandle(
   projectId: string,
   project?: Partial<ProjectWorkspace>,
   options?: { allowPromptRequest?: boolean }
-): Promise<{ ledger: SpecLedgerFile; fileName: string }> {
+): Promise<{ ledger: SpecLedgerFile; fileName: string; lastModified: number }> {
   try {
     const allowPrompt = options?.allowPromptRequest ?? false;
     const perm = await checkFileHandlePermission(handle, 'read');
@@ -167,12 +189,13 @@ export async function readLedgerFromHandle(
       return {
         ledger: createEmptyLedgerPayload(project, projectId),
         fileName: file.name,
+        lastModified: file.lastModified,
       };
     }
 
     const parsed = JSON.parse(text);
     const ledger = normalizeLedgerJson(parsed, projectId, project);
-    return { ledger, fileName: file.name };
+    return { ledger, fileName: file.name, lastModified: file.lastModified };
   } catch (err: any) {
     if (err instanceof PermissionRequiredError || err instanceof FileMissingError) {
       throw err;
@@ -204,7 +227,7 @@ export async function writeLedgerToHandle(
   handle: FileSystemFileHandle,
   ledger: SpecLedgerFile,
   options?: { allowPromptRequest?: boolean }
-): Promise<void> {
+): Promise<number> {
   try {
     const allowPrompt = options?.allowPromptRequest ?? false;
     const perm = await checkFileHandlePermission(handle, 'readwrite');
@@ -232,6 +255,12 @@ export async function writeLedgerToHandle(
     const writable = await (handle as any).createWritable();
     await writable.write(JSON.stringify(serialized, null, 2));
     await writable.close();
+    try {
+      const updatedFile = await handle.getFile();
+      return updatedFile.lastModified;
+    } catch {
+      return Date.now();
+    }
   } catch (err: any) {
     if (err instanceof PermissionRequiredError || err instanceof FileMissingError) {
       throw err;

@@ -33,9 +33,10 @@ interface ItemEditModalProps {
 }
 
 const PRESET_SPECS = [
+  { name: '型式', unit: '', defaultVal: '' },
   { name: '口径', unit: 'A', defaultVal: '50' },
   { name: '出力', unit: 'kW', defaultVal: '7.5' },
-  { name: '流量', unit: 'm³/h', defaultVal: '30' },
+  { name: '流量', unit: 'm³/min', defaultVal: '30' },
   { name: '全揚程', unit: 'm', defaultVal: '25' },
   { name: '材質', unit: '', defaultVal: 'SUS304' },
   { name: '耐圧', unit: 'MPa', defaultVal: '1.0' },

@@ -23,6 +23,7 @@ import {
   Trash2,
   Sparkles,
   HardDrive,
+  FolderOpen,
 } from 'lucide-react';
 import {
   EquipmentItem,
@@ -30,6 +31,7 @@ import {
   Category,
   SpecFieldMapping,
   ProjectWorkspace,
+  TemplateFolderState,
   RevisionNumber,
   RevisionHistoryEntry,
   SpecIssuanceRecord,
@@ -55,6 +57,8 @@ interface SpecDashboardTabProps {
   activeProjectId: string;
   currentProject?: ProjectWorkspace;
   ledgerRecords?: SpecIssuanceRecord[];
+  templateFolderState?: TemplateFolderState | null;
+  onReconnectTemplateFolder?: () => void;
   onConfirmIssuance?: (record: SpecIssuanceRecord) => Promise<{ savedToDisk: boolean; needsPermission?: boolean }>;
   onDeleteLedgerRecord?: (recordId: string) => void;
   onCreateNewLedgerFile?: (projectId: string) => void;
@@ -84,6 +88,8 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
   activeProjectId,
   currentProject,
   ledgerRecords = [],
+  templateFolderState,
+  onReconnectTemplateFolder,
   onConfirmIssuance,
   onDeleteLedgerRecord,
   onCreateNewLedgerFile,
@@ -106,8 +112,29 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
     }
   });
 
-  // Selected Template
+  // Selected Template & compact selector filter
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>(templates[0]?.id || '');
+  const [templateSearch, setTemplateSearch] = useState<string>('');
+
+  useEffect(() => {
+    if (templates.length === 0) return;
+    if (!selectedTemplateId || !templates.some((t) => t.id === selectedTemplateId)) {
+      setSelectedTemplateId(templates[0].id);
+    }
+  }, [templates, selectedTemplateId]);
+
+  const filteredTemplates = useMemo(() => {
+    const q = templateSearch.trim().toLowerCase();
+    if (!q) return templates;
+    return templates.filter(
+      (t) =>
+        t.name.toLowerCase().includes(q) ||
+        (t.code || '').toLowerCase().includes(q) ||
+        (t.excelFileName || '').toLowerCase().includes(q) ||
+        (t.mappingFileName || '').toLowerCase().includes(q)
+    );
+  }, [templates, templateSearch]);
+
   const activeTemplate = useMemo(() => {
     const found = templates.find((t) => t.id === selectedTemplateId) || templates[0];
     return found ? normalizeSpecTemplate(found) : found;
@@ -457,10 +484,28 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
       setActiveRecordId(record.id);
       setLoadedSnapshot(latestSnap);
 
-      // Restore template
+      // Restore template (match by ID first, then Excel/mapping filename, then templateName)
       const targetTplId = latestSnap?.templateId || record.templateId;
-      if (targetTplId && templates.some((t) => t.id === targetTplId)) {
-        setSelectedTemplateId(targetTplId);
+      const targetExcelName = latestSnap?.templateExcelFileName || record.templateExcelFileName;
+      const targetMappingName = latestSnap?.templateMappingFileName || record.templateMappingFileName;
+      const targetTplName = latestSnap?.templateName || record.templateName;
+
+      const matchedTpl =
+        (targetTplId ? templates.find((t) => t.id === targetTplId) : undefined) ||
+        (targetExcelName
+          ? templates.find(
+              (t) =>
+                t.excelFileName === targetExcelName ||
+                t.masterFileName === targetExcelName ||
+                t.originalFileName === targetExcelName
+            )
+          : undefined) ||
+        (targetMappingName ? templates.find((t) => t.mappingFileName === targetMappingName) : undefined) ||
+        (targetTplName ? templates.find((t) => t.name === targetTplName) : undefined);
+
+      if (matchedTpl) {
+        setSelectedTemplateId(matchedTpl.id);
+        setSelectedSheetOverride('');
       }
 
       // Restore selected multi-equipment bundle automatically
@@ -935,6 +980,16 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
       const currentEntry =
         selectedRevision >= 1 ? revEntries[selectedRevision as 1 | 2 | 3] : null;
 
+      const usedTemplateSource: 'folder' | 'preset' | 'custom_excel' =
+        activeTemplate.sourceLocation === 'folder' ? 'folder' : activeTemplate.sourceType;
+      const usedExcelFileName =
+        activeTemplate.excelFileName || activeTemplate.masterFileName || activeTemplate.originalFileName || undefined;
+      const usedMappingFileName = activeTemplate.mappingFileName || undefined;
+      const usedFolderName =
+        activeTemplate.sourceLocation === 'folder'
+          ? activeTemplate.folderName || templateFolderState?.folderName || undefined
+          : undefined;
+
       const snapshot: SpecRevisionSnapshot = {
         revision: selectedRevision,
         revisionLabel: currentEntry?.revisionLabel || `Rev${selectedRevision}`,
@@ -945,6 +1000,11 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
         docNo,
         templateId: activeTemplate.id,
         templateName: activeTemplate.name,
+        templateCode: activeTemplate.code || undefined,
+        templateSource: usedTemplateSource,
+        templateExcelFileName: usedExcelFileName,
+        templateMappingFileName: usedMappingFileName,
+        templateFolderName: usedFolderName,
         orderedItemIds: orderedActiveItems.map((it) => it.id),
         primaryItemId: orderedActiveItems[0].id,
         itemTagNos: orderedActiveItems.map((it) => it.tagNo || ''),
@@ -975,6 +1035,11 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
           docNo,
           templateId: activeTemplate.id,
           templateName: activeTemplate.name,
+          templateCode: activeTemplate.code || undefined,
+          templateSource: usedTemplateSource,
+          templateExcelFileName: usedExcelFileName,
+          templateMappingFileName: usedMappingFileName,
+          templateFolderName: usedFolderName,
           orderedItemIds: snapshot.orderedItemIds,
           primaryItemId: snapshot.primaryItemId,
           itemTagNos: snapshot.itemTagNos,
@@ -992,6 +1057,11 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
           docNo,
           templateId: activeTemplate.id,
           templateName: activeTemplate.name,
+          templateCode: activeTemplate.code || undefined,
+          templateSource: usedTemplateSource,
+          templateExcelFileName: usedExcelFileName,
+          templateMappingFileName: usedMappingFileName,
+          templateFolderName: usedFolderName,
           orderedItemIds: snapshot.orderedItemIds,
           primaryItemId: snapshot.primaryItemId,
           itemTagNos: snapshot.itemTagNos,
@@ -1116,6 +1186,8 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
         r.title.toLowerCase().includes(q) ||
         r.docNo.toLowerCase().includes(q) ||
         r.templateName.toLowerCase().includes(q) ||
+        (r.templateExcelFileName || '').toLowerCase().includes(q) ||
+        (r.templateMappingFileName || '').toLowerCase().includes(q) ||
         r.itemNames.some((n) => n.toLowerCase().includes(q)) ||
         r.itemTagNos.some((t) => t.toLowerCase().includes(q))
     );
@@ -1195,11 +1267,11 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
           {onOpenAdminMapping && (
             <button
               onClick={() => onOpenAdminMapping(selectedTemplateId)}
-              className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
-              title="管理者専用: セル番地や変更履歴欄のマッピング定義を変更"
+              className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer whitespace-nowrap"
+              title="設定管理（参照元フォルダ・セル番地・変更履歴欄の設定）"
             >
               <Settings2 className="w-3.5 h-3.5 text-indigo-600" />
-              <span>マッピング設定管理</span>
+              <span>設定管理</span>
             </button>
           )}
         </div>
@@ -1282,41 +1354,52 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between pt-1.5 border-t border-slate-100 text-[10px] text-slate-400">
-                      <span className="truncate max-w-[160px]">{rec.templateName}</span>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <span className="font-mono">{rec.updatedAt.slice(0, 10)}</span>
-                        {onDeleteLedgerRecord && !isConfirmDelete && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteConfirmRecordId(rec.id);
-                            }}
-                            className="p-0.5 text-slate-400 hover:text-red-600 rounded cursor-pointer"
-                            title="台帳から削除"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        )}
-                        {isConfirmDelete && onDeleteLedgerRecord && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDeleteLedgerRecord(rec.id);
-                              setDeleteConfirmRecordId(null);
-                              if (activeRecordId === rec.id) {
-                                setActiveRecordId('');
-                                setLoadedSnapshot(null);
-                              }
-                            }}
-                            className="px-1.5 py-0.5 bg-red-600 text-white rounded text-[10px] font-bold cursor-pointer"
-                          >
-                            削除確定
-                          </button>
-                        )}
+                    <div className="pt-1.5 border-t border-slate-100 space-y-1 text-[10px] text-slate-400">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate font-medium text-slate-600" title={rec.templateName}>
+                          {rec.templateName}
+                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="font-mono">{rec.updatedAt.slice(0, 10)}</span>
+                          {onDeleteLedgerRecord && !isConfirmDelete && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeleteConfirmRecordId(rec.id);
+                              }}
+                              className="p-0.5 text-slate-400 hover:text-red-600 rounded cursor-pointer"
+                              title="台帳から削除"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
+                          {isConfirmDelete && onDeleteLedgerRecord && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteLedgerRecord(rec.id);
+                                setDeleteConfirmRecordId(null);
+                                if (activeRecordId === rec.id) {
+                                  setActiveRecordId('');
+                                  setLoadedSnapshot(null);
+                                }
+                              }}
+                              className="px-1.5 py-0.5 bg-red-600 text-white rounded text-[10px] font-bold cursor-pointer"
+                            >
+                              削除確定
+                            </button>
+                          )}
+                        </div>
                       </div>
+                      {(rec.templateExcelFileName || rec.templateMappingFileName) && (
+                        <div className="font-mono text-[10px] text-slate-400 truncate" title={`雛形: ${rec.templateExcelFileName || '-'} / JSON: ${rec.templateMappingFileName || '-'}`}>
+                          {rec.templateExcelFileName ? `Excel: ${rec.templateExcelFileName}` : ''}
+                          {rec.templateExcelFileName && rec.templateMappingFileName ? ' · ' : ''}
+                          {rec.templateMappingFileName ? `JSON: ${rec.templateMappingFileName}` : ''}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -1364,36 +1447,139 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* Left Column (5 cols) */}
         <div className="lg:col-span-5 space-y-4">
-          {/* 1. Template Selector Card */}
-          <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                <FileText className="w-4 h-4 text-indigo-600" />
-                <span>仕様書テンプレートの選択</span>
-              </label>
-              <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-                台帳タイトル予定: <strong className="text-slate-900">{ledgerTitlePreview}</strong>
-              </span>
+          {/* 1. Template Selector Card (Compact Scrollable Selector) */}
+          <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs space-y-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <FileText className="w-4 h-4 text-indigo-600 shrink-0" />
+                <span className="text-xs font-bold text-slate-900 whitespace-nowrap">
+                  仕様書テンプレートの選択
+                </span>
+                <span className="text-[10px] font-mono text-slate-400 whitespace-nowrap">
+                  ({templates.length}件)
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {templateFolderState?.needsPermission && onReconnectTemplateFolder ? (
+                  <button
+                    type="button"
+                    onClick={onReconnectTemplateFolder}
+                    className="text-[10px] font-semibold text-sky-700 hover:text-sky-900 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>フォルダ再接続</span>
+                  </button>
+                ) : templateFolderState?.folderName ? (
+                  <span
+                    className="text-[10px] font-mono text-slate-500 flex items-center gap-1 max-w-[140px] truncate"
+                    title={`参照元フォルダ: ${templateFolderState.folderName}`}
+                  >
+                    <FolderOpen className="w-3 h-3 text-indigo-500 shrink-0" />
+                    <span className="truncate">{templateFolderState.folderName}</span>
+                  </span>
+                ) : (
+                  onOpenAdminMapping && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenAdminMapping(selectedTemplateId)}
+                      className="text-[10px] font-medium text-indigo-600 hover:underline flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                    >
+                      <FolderOpen className="w-3 h-3" />
+                      <span>設定管理でフォルダ登録</span>
+                    </button>
+                  )
+                )}
+
+                <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded whitespace-nowrap">
+                  台帳: <strong className="text-slate-900">{ledgerTitlePreview}</strong>
+                </span>
+              </div>
             </div>
 
-            <select
-              value={selectedTemplateId}
-              onChange={(e) => {
-                setSelectedTemplateId(e.target.value);
-                setSelectedSheetOverride('');
-              }}
-              className="w-full text-xs font-semibold text-slate-800 bg-slate-50 border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden cursor-pointer"
-            >
+            {templates.length > 5 && (
+              <div className="relative">
+                <Search className="w-3 h-3 text-slate-400 absolute left-2.5 top-2" />
+                <input
+                  type="text"
+                  value={templateSearch}
+                  onChange={(e) => setTemplateSearch(e.target.value)}
+                  placeholder="テンプレート名・ファイル名で絞込..."
+                  className="w-full text-[11px] bg-slate-50 border border-slate-200 rounded-md pl-7 pr-2 py-1 focus:bg-white focus:border-indigo-500 focus:outline-hidden"
+                />
+              </div>
+            )}
+
+            <div className="max-h-36 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-lg bg-white">
               {templates.length === 0 ? (
-                <option value="">テンプレート未登録（「マッピング設定管理」から作成）</option>
+                <div className="p-3 text-xs text-slate-500 text-center">
+                  テンプレート未登録（「設定管理」から参照元フォルダを選択または作成）
+                </div>
+              ) : filteredTemplates.length === 0 ? (
+                <div className="p-2.5 text-[11px] text-slate-400 text-center">
+                  条件に一致するテンプレートがありません
+                </div>
               ) : (
-                templates.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))
+                filteredTemplates.map((t) => {
+                  const isActive = t.id === (activeTemplate?.id || selectedTemplateId);
+                  const isFolder = t.sourceLocation === 'folder';
+                  const statusLabel = isFolder
+                    ? t.hasPairedMappingFile
+                      ? 'フォルダ・連携済'
+                      : 'フォルダ・未設定'
+                    : '内蔵';
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedTemplateId(t.id);
+                        setSelectedSheetOverride('');
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 text-xs flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                        isActive
+                          ? 'bg-indigo-50/90 text-indigo-950 font-semibold'
+                          : 'bg-white text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className={`w-2 h-2 rounded-full shrink-0 ${
+                            isActive ? 'bg-indigo-600' : 'bg-slate-300'
+                          }`}
+                        />
+                        <span className="truncate">{t.name}</span>
+                      </div>
+                      <span
+                        className={`text-[10px] font-mono shrink-0 whitespace-nowrap ${
+                          isFolder
+                            ? t.hasPairedMappingFile
+                              ? 'text-emerald-700'
+                              : 'text-amber-700'
+                            : 'text-slate-400'
+                        }`}
+                      >
+                        {statusLabel}
+                      </span>
+                    </button>
+                  );
+                })
               )}
-            </select>
+            </div>
+
+            {activeTemplate &&
+              (activeTemplate.sourceLocation === 'folder' ||
+                activeTemplate.excelFileName ||
+                activeTemplate.mappingFileName) && (
+                <div className="text-[10px] font-mono text-slate-500 flex items-center justify-between gap-2 px-0.5 truncate">
+                  <span className="truncate">
+                    雛形: {activeTemplate.excelFileName || activeTemplate.masterFileName || activeTemplate.originalFileName || '-'}
+                  </span>
+                  <span className="truncate text-right shrink-0 max-w-[50%]">
+                    マッピング: {activeTemplate.mappingFileName || '未設定 (既定値)'}
+                  </span>
+                </div>
+              )}
           </div>
 
           {/* 2. 基本情報 Card */}

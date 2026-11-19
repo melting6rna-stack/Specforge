@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Settings2, 
   FileSpreadsheet, 
@@ -7,23 +7,20 @@ import {
   Plus, 
   Edit3, 
   Trash2, 
-  Check, 
   Save, 
-  FileText, 
-  ShieldCheck,
-  AlertCircle,
   Target,
-  FileCheck2,
   Copy,
   CheckSquare,
-  List,
   Calendar,
   Layers,
-  ArrowRight,
+  ArrowLeft,
   HardDrive,
-  AlertTriangle
+  AlertTriangle,
+  FolderOpen,
+  RefreshCw,
+  FolderSync
 } from 'lucide-react';
-import { SpecTemplate, SpecFieldMapping, SpecMappingAssetFile, EquipmentItem, ProjectWorkspace } from '../types';
+import { SpecTemplate, SpecFieldMapping, SpecMappingAssetFile, EquipmentItem, ProjectWorkspace, TemplateFolderState } from '../types';
 import { exportMappingAssetAsJson, importMappingAssetFromJson, createDefaultMasterWorkbook } from '../utils/exceljsEngine';
 import { normalizeSpecTemplate, REVISION_FIELD_DEFS } from '../utils/templateUtils';
 
@@ -35,16 +32,28 @@ interface TemplateAdminTabProps {
   activeTemplateId?: string;
   onSelectTemplate?: (id: string) => void;
   onBackToDashboard?: () => void;
+  templateFolderState?: TemplateFolderState | null;
+  isFolderSyncing?: boolean;
+  onSelectTemplateFolder?: () => Promise<{ selected: boolean; fallbackToInput?: boolean; errorMessage?: string }>;
+  onImportTemplateFolderFiles?: (files: FileList) => Promise<void> | void;
+  onSyncTemplateFolder?: () => Promise<void> | void;
+  onClearTemplateFolder?: () => Promise<void> | void;
+  onSaveMappingToFolder?: (tpl: SpecTemplate) => Promise<{ writtenToFolder: boolean; fileName: string; message?: string }>;
 }
 
 export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
   templates,
   onUpdateTemplates,
   items,
-  currentProject,
   activeTemplateId,
-  onSelectTemplate,
-  onBackToDashboard
+  onBackToDashboard,
+  templateFolderState,
+  isFolderSyncing = false,
+  onSelectTemplateFolder,
+  onImportTemplateFolderFiles,
+  onSyncTemplateFolder,
+  onClearTemplateFolder,
+  onSaveMappingToFolder,
 }) => {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>(
     activeTemplateId || templates[0]?.id || ''
@@ -55,9 +64,23 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
   const [deleteTargetTpl, setDeleteTargetTpl] = useState<SpecTemplate | null>(null);
   const [message, setMessage] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [templateFilter, setTemplateFilter] = useState<string>('');
 
   const excelInputRef = useRef<HTMLInputElement | null>(null);
   const jsonAssetInputRef = useRef<HTMLInputElement | null>(null);
+  const folderFallbackInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (activeTemplateId && templates.some(t => t.id === activeTemplateId)) {
+      setSelectedTemplateId(activeTemplateId);
+    }
+  }, [activeTemplateId, templates]);
+
+  useEffect(() => {
+    if (!templates.some(t => t.id === selectedTemplateId) && templates.length > 0) {
+      setSelectedTemplateId(templates[0].id);
+    }
+  }, [templates, selectedTemplateId]);
 
   const currentTemplate = templates.find(t => t.id === selectedTemplateId) || templates[0];
 
@@ -105,8 +128,8 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
     setIsEditing(true);
   };
 
-  // Save template modifications
-  const handleSaveEdit = () => {
+  // Save template modifications (and write paired .specmap.json into registered folder when applicable)
+  const handleSaveEdit = async () => {
     if (!editingTemplate) return;
     const cleanName = editingTemplate.name.trim() || '無題のテンプレート';
     const cleanedTpl = normalizeSpecTemplate({
@@ -118,8 +141,66 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
     onUpdateTemplates(updated);
     setIsEditing(false);
     setEditingTemplate(null);
-    setMessage(`テンプレート「${cleanedTpl.name}」の設定とマッピングを保存しました。`);
-    setTimeout(() => setMessage(''), 4000);
+
+    if (cleanedTpl.sourceLocation === 'folder' && onSaveMappingToFolder) {
+      try {
+        const res = await onSaveMappingToFolder(cleanedTpl);
+        if (res.writtenToFolder) {
+          setMessage(`「${cleanedTpl.name}」の設定を保存し、参照元フォルダへ「${res.fileName}」を保存しました。`);
+        } else {
+          setMessage(`「${cleanedTpl.name}」の設定を保存しました（${res.message || '次回選択時に反映されます'}）。`);
+        }
+      } catch (err: any) {
+        setMessage(`「${cleanedTpl.name}」の設定を保存しました（フォルダ書込: ${err?.message || '権限が必要'}）。`);
+      }
+    } else {
+      setMessage(`テンプレート「${cleanedTpl.name}」の設定を保存しました。`);
+    }
+    setTimeout(() => setMessage(''), 5000);
+  };
+
+  const handlePickFolderClick = async () => {
+    setErrorMessage('');
+    if (!onSelectTemplateFolder) {
+      folderFallbackInputRef.current?.click();
+      return;
+    }
+    const res = await onSelectTemplateFolder();
+    if (res.fallbackToInput) {
+      folderFallbackInputRef.current?.click();
+    } else if (res.errorMessage) {
+      setErrorMessage(res.errorMessage);
+    }
+  };
+
+  const handleFallbackFolderChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0 && onImportTemplateFolderFiles) {
+      try {
+        await onImportTemplateFolderFiles(files);
+      } catch (err: any) {
+        setErrorMessage(`フォルダ読み込みに失敗しました: ${err?.message || 'エラー'}`);
+      }
+    }
+    e.target.value = '';
+  };
+
+  const handleSaveCurrentMappingToFolder = async (tpl: SpecTemplate) => {
+    if (!onSaveMappingToFolder) return;
+    setErrorMessage('');
+    try {
+      const res = await onSaveMappingToFolder(tpl);
+      if (res.writtenToFolder) {
+        setMessage(`参照元フォルダへ「${res.fileName}」を保存しました。次回から自動引用されます。`);
+        setTimeout(() => setMessage(''), 5000);
+      } else {
+        exportMappingAssetAsJson(tpl);
+        setMessage(`書き込み権限がないため「${tpl.name}」のマッピングJSONをダウンロードしました。参照元フォルダへ配置してください。`);
+        setTimeout(() => setMessage(''), 6000);
+      }
+    } catch (err: any) {
+      setErrorMessage(`フォルダへの保存に失敗しました: ${err?.message || 'エラー'}`);
+    }
   };
 
   // Create new template
@@ -406,30 +487,57 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
     });
   };
 
+  const filteredTemplates = React.useMemo(() => {
+    const q = templateFilter.trim().toLowerCase();
+    if (!q) return templates;
+    return templates.filter(t =>
+      t.name.toLowerCase().includes(q) ||
+      (t.excelFileName || '').toLowerCase().includes(q) ||
+      (t.mappingFileName || '').toLowerCase().includes(q)
+    );
+  }, [templates, templateFilter]);
+
   return (
     <div className="space-y-4">
-      
+      {/* Hidden webkitdirectory fallback input */}
+      <input
+        type="file"
+        ref={folderFallbackInputRef}
+        {...({ webkitdirectory: '', directory: '' } as any)}
+        multiple
+        onChange={handleFallbackFolderChange}
+        className="hidden"
+      />
+
       {/* Top Header */}
       <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
+            <Settings2 className="w-4 h-4 text-slate-700 shrink-0" />
             <h1 className="text-base font-bold text-slate-900">
-              仕様書テンプレート ＆ セルマッピング管理 (管理者用)
+              設定管理
             </h1>
-            <span className="text-[10px] bg-slate-900 text-white font-mono px-2 py-0.5 rounded font-bold">
-              ADMIN MODE
-            </span>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            マスター雛形Excelのアップロード、セル番地（B2, C8, E30等）の流し込み定義、チェック項目および選択肢の設定を一元管理します。
+            仕様書テンプレートの参照元フォルダ登録、セル番地マッピング、チェック項目および基本情報連携を一元管理します。
           </p>
         </div>
 
-        {/* Global Admin Actions */}
+        {/* Global Settings Actions */}
         <div className="flex items-center gap-2 flex-wrap shrink-0">
+          {onBackToDashboard && (
+            <button
+              type="button"
+              onClick={onBackToDashboard}
+              className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>仕様書画面へ戻る</span>
+            </button>
+          )}
           <button
             onClick={handleCreateNewTemplate}
-            className="px-3.5 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+            className="px-3.5 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md transition-all flex items-center gap-1.5 shadow-xs cursor-pointer whitespace-nowrap"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>新規テンプレート作成</span>
@@ -437,17 +545,112 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
         </div>
       </div>
 
+      {/* Reference Source Folder Configuration Panel */}
+      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-2.5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5 min-w-0">
+            <FolderOpen className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+            <div className="min-w-0 space-y-0.5">
+              <div className="flex items-center gap-2 flex-wrap text-xs">
+                <span className="font-bold text-slate-900">参照元フォルダ設定（Excel雛形 ＆ 同名マッピングJSON自動引用）</span>
+              </div>
+              {templateFolderState ? (
+                <div className="text-[11px] text-slate-600 flex items-center gap-2 flex-wrap">
+                  <span className="font-mono font-semibold text-slate-900">{templateFolderState.folderName}</span>
+                  <span className="text-slate-300">·</span>
+                  <span>Excel雛形 {templateFolderState.excelCount}件</span>
+                  <span className="text-slate-300">·</span>
+                  <span>マッピングJSON {templateFolderState.mappingCount}件</span>
+                  <span className="text-slate-300">·</span>
+                  <span className="font-medium text-emerald-700">自動連携 {templateFolderState.pairedCount}件</span>
+                  {templateFolderState.lastSyncAt && (
+                    <>
+                      <span className="text-slate-300">·</span>
+                      <span className="text-slate-400">最終同期 {templateFolderState.lastSyncAt}</span>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <p className="text-[11px] text-slate-500">
+                  参照元フォルダを登録すると、フォルダ内の仕様書Excel（.xlsx）と同名のマッピングJSON（.specmap.json / .json）を自動で結び付けて選択できます。
+                </p>
+              )}
+              {templateFolderState?.needsPermission && (
+                <p className="text-[11px] text-sky-800 font-medium pt-0.5">
+                  ブラウザ更新後のため、右の「アクセス許可して再読込」をクリックしてフォルダ連動を再開してください。
+                </p>
+              )}
+              {templateFolderState?.isError && templateFolderState.errorMessage && (
+                <p className="text-[11px] text-red-700 font-medium pt-0.5">
+                  {templateFolderState.errorMessage}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
+            {templateFolderState?.needsPermission && onSyncTemplateFolder && (
+              <button
+                type="button"
+                onClick={onSyncTemplateFolder}
+                disabled={isFolderSyncing}
+                className="px-3 py-1.5 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isFolderSyncing ? 'animate-spin' : ''}`} />
+                <span>アクセス許可して再読込</span>
+              </button>
+            )}
+
+            {templateFolderState && !templateFolderState.needsPermission && templateFolderState.mode === 'handle' && onSyncTemplateFolder && (
+              <button
+                type="button"
+                onClick={onSyncTemplateFolder}
+                disabled={isFolderSyncing}
+                className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-slate-500 ${isFolderSyncing ? 'animate-spin' : ''}`} />
+                <span>再読込</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={handlePickFolderClick}
+              disabled={isFolderSyncing}
+              className="px-3 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+            >
+              <FolderSync className="w-3.5 h-3.5" />
+              <span>{templateFolderState ? '参照元フォルダを変更' : '参照元フォルダを選択・登録'}</span>
+            </button>
+
+            {templateFolderState && onClearTemplateFolder && (
+              <button
+                type="button"
+                onClick={onClearTemplateFolder}
+                className="px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:text-red-700 hover:bg-red-50 border border-slate-200 rounded-md transition-colors cursor-pointer whitespace-nowrap"
+              >
+                解除
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="text-[11px] text-slate-500 border-t border-slate-100 pt-2">
+          ルール例: 同じフォルダ内に <span className="font-mono text-slate-700">配管仕様書.xlsx</span> と <span className="font-mono text-slate-700">配管仕様書.specmap.json</span>（または <span className="font-mono text-slate-700">.json</span>）を配置すると、仕様書作成画面で選ぶだけでマッピングが自動適用されます。
+        </div>
+      </div>
+
       {message && (
         <div className="bg-emerald-600 text-white text-xs py-2 px-4 rounded-lg shadow-xs flex items-center justify-between animate-in fade-in">
           <span>{message}</span>
-          <button onClick={() => setMessage('')} className="text-white hover:text-emerald-200">✕</button>
+          <button onClick={() => setMessage('')} className="text-white hover:text-emerald-200 cursor-pointer">✕</button>
         </div>
       )}
 
       {errorMessage && (
         <div className="bg-red-600 text-white text-xs py-2 px-4 rounded-lg shadow-xs flex items-center justify-between animate-in fade-in">
           <span>{errorMessage}</span>
-          <button onClick={() => setErrorMessage('')} className="text-white hover:text-red-200">✕</button>
+          <button onClick={() => setErrorMessage('')} className="text-white hover:text-red-200 cursor-pointer">✕</button>
         </div>
       )}
 
@@ -462,14 +665,25 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
               <span className="text-[10px] font-mono text-slate-400">{templates.length}件</span>
             </div>
 
-            <div className="space-y-1.5">
-              {templates.length === 0 ? (
+            {templates.length > 5 && (
+              <input
+                type="text"
+                value={templateFilter}
+                onChange={(e) => setTemplateFilter(e.target.value)}
+                placeholder="テンプレート名で絞込..."
+                className="w-full text-xs bg-slate-50 border border-slate-200 rounded-md px-2.5 py-1.5 focus:bg-white focus:border-indigo-400 focus:outline-hidden"
+              />
+            )}
+
+            <div className="space-y-1.5 max-h-[520px] overflow-y-auto pr-1">
+              {filteredTemplates.length === 0 ? (
                 <div className="py-6 text-center text-[11px] text-slate-400">
-                  登録テンプレートがありません
+                  該当するテンプレートがありません
                 </div>
               ) : (
-                templates.map(tpl => {
+                filteredTemplates.map(tpl => {
                   const isSelected = tpl.id === selectedTemplateId;
+                  const isFolder = tpl.sourceLocation === 'folder';
                   return (
                     <div
                       key={tpl.id}
@@ -486,22 +700,26 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="truncate">{tpl.name}</span>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteTargetTpl(tpl);
-                          }}
-                          className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors shrink-0 cursor-pointer"
-                          title={`「${tpl.name}」を削除`}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        {!isFolder && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteTargetTpl(tpl);
+                            }}
+                            className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors shrink-0 cursor-pointer"
+                            title={`「${tpl.name}」を削除`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
-                      <div className="text-[10px] text-slate-500 font-normal mt-1 flex items-center gap-1.5">
-                        <span>項目: {tpl.fields?.length || 0}個</span>
-                        <span>•</span>
-                        <span>更新: {tpl.updatedAt}</span>
+                      <div className="text-[10px] text-slate-500 font-normal mt-1 flex items-center gap-1.5 truncate">
+                        <span>{isFolder ? (tpl.hasPairedMappingFile ? 'フォルダ連携済' : 'フォルダ(未設定)') : 'ローカル'}</span>
+                        <span>·</span>
+                        <span>項目: {tpl.fields?.length || 0}</span>
+                        <span>·</span>
+                        <span className="truncate">{tpl.updatedAt}</span>
                       </div>
                     </div>
                   );
@@ -583,22 +801,35 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                     </button>
                     <button
                       onClick={handleSaveEdit}
-                      className="px-4 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                      className="px-4 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md shadow-xs flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
                     >
                       <Save className="w-3.5 h-3.5" />
-                      <span>マッピング設定を保存</span>
+                      <span>設定を保存</span>
                     </button>
                   </>
                 ) : (
                   <>
-                    <button
-                      onClick={() => setDeleteTargetTpl(activeTpl)}
-                      className="px-3 py-1.5 text-xs font-medium text-red-600 bg-white hover:bg-red-50 border border-red-200 rounded-md transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
-                      title="このテンプレートを削除"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>削除</span>
-                    </button>
+                    {activeTpl.sourceLocation === 'folder' && onSaveMappingToFolder && (
+                      <button
+                        type="button"
+                        onClick={() => handleSaveCurrentMappingToFolder(activeTpl)}
+                        className="px-3 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                        title="このテンプレートと同名のマッピングJSONをフォルダに保存"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        <span>フォルダへJSON保存</span>
+                      </button>
+                    )}
+                    {activeTpl.sourceLocation !== 'folder' && (
+                      <button
+                        onClick={() => setDeleteTargetTpl(activeTpl)}
+                        className="px-3 py-1.5 text-xs font-medium text-red-600 bg-white hover:bg-red-50 border border-red-200 rounded-md transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                        title="このテンプレートを削除"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>削除</span>
+                      </button>
+                    )}
                     <button
                       onClick={() => handleDuplicateTemplate(activeTpl)}
                       className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-md transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
@@ -620,16 +851,21 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
 
             {/* Master Template Excel File Status */}
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 min-w-0">
                 <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
                   <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
                 </div>
-                <div>
-                  <div className="font-semibold text-slate-900 flex items-center gap-1.5">
+                <div className="min-w-0">
+                  <div className="font-semibold text-slate-900 flex items-center gap-1.5 flex-wrap">
                     <span>マスター雛形Excel:</span>
-                    <span className="font-mono text-emerald-700">
-                      {activeTpl.masterFileName || activeTpl.originalFileName || 'システム内蔵高品位マスター雛形 (ExcelJS)'}
+                    <span className="font-mono text-emerald-700 truncate">
+                      {activeTpl.excelFileName || activeTpl.masterFileName || activeTpl.originalFileName || 'システム内蔵高品位マスター雛形 (ExcelJS)'}
                     </span>
+                    {activeTpl.sourceLocation === 'folder' && (
+                      <span className="text-[11px] font-normal text-slate-500">
+                        · {activeTpl.mappingFileName ? `連携JSON: ${activeTpl.mappingFileName}` : '同名マッピングJSON未作成（既定マッピング）'}
+                      </span>
+                    )}
                   </div>
                   <div className="text-[11px] text-slate-500">
                     共有フォルダの原本は保護され、メモリ内で安全にコピー作成した上で値を流し込みます。
@@ -1298,7 +1534,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                 「{deleteTargetTpl.name}」を削除しますか？
               </p>
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                この操作を実行すると、該当テンプレートのマッピング設定および登録された雛形Excelデータは一覧から削除され、元に戻せません。
+                この操作を実行すると、該当テンプレートの設定および登録された雛形Excelデータは一覧から削除され、元に戻せません。
               </p>
             </div>
             <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">

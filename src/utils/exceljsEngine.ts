@@ -619,6 +619,7 @@ export async function downloadSpecificationExcel(
  */
 export function exportMappingAssetAsJson(template: SpecTemplate): void {
   const normalized = normalizeSpecTemplate(template);
+  const excelRef = normalized.excelFileName || normalized.masterFileName || normalized.originalFileName;
   const asset: SpecMappingAssetFile = {
     version: '1.0',
     schemaType: 'specforge-mapping-asset',
@@ -629,7 +630,8 @@ export function exportMappingAssetAsJson(template: SpecTemplate): void {
     description: normalized.description,
     targetCategoryName: normalized.targetCategoryName,
     fields: normalized.fields || [],
-    masterFileName: normalized.masterFileName || normalized.originalFileName,
+    masterFileName: excelRef,
+    excelFileName: excelRef,
     masterWorkbookBase64: normalized.masterWorkbookBase64 || normalized.rawWorkbookBase64
   };
 
@@ -638,8 +640,15 @@ export function exportMappingAssetAsJson(template: SpecTemplate): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  const safeName = (template.name || 'template').replace(/[\s/\\?%*:|"<>]/g, '_');
-  a.download = `MappingAsset_${safeName}_${new Date().toISOString().slice(0, 10)}.specmap.json`;
+  if (normalized.mappingFileName && normalized.mappingFileName.toLowerCase().endsWith('.json')) {
+    a.download = normalized.mappingFileName;
+  } else if (excelRef) {
+    const stem = excelRef.replace(/\.(xlsx|xlsm)$/i, '');
+    a.download = `${stem}.specmap.json`;
+  } else {
+    const safeName = (template.name || 'template').replace(/[\s/\\?%*:|"<>]/g, '_');
+    a.download = `${safeName}.specmap.json`;
+  }
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -653,7 +662,7 @@ export function importMappingAssetFromJson(jsonString: string): SpecMappingAsset
   const parsed = JSON.parse(jsonString);
   if (!parsed.schemaType || parsed.schemaType !== 'specforge-mapping-asset') {
     // Check if it's a general spec template
-    if (!parsed.templateName && !parsed.name) {
+    if (!parsed.templateName && !parsed.name && !Array.isArray(parsed.fields)) {
       throw new Error('有効なSpecForgeマッピング定義ファイル（.specmap.json）ではありません。');
     }
   }
@@ -668,7 +677,8 @@ export function importMappingAssetFromJson(jsonString: string): SpecMappingAsset
     targetCategoryName: parsed.targetCategoryName,
     fields: parsed.fields || [],
     tableMapping: parsed.tableMapping,
-    masterFileName: parsed.masterFileName || parsed.originalFileName,
+    masterFileName: parsed.masterFileName || parsed.excelFileName || parsed.originalFileName,
+    excelFileName: parsed.excelFileName || parsed.masterFileName || parsed.originalFileName,
     masterWorkbookBase64: parsed.masterWorkbookBase64 || parsed.rawWorkbookBase64
   };
 }

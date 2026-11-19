@@ -28,9 +28,10 @@ interface ItemCreateModalProps {
 
 // Preset specification suggestions commonly used in industrial plants
 const PRESET_SPECS = [
+  { name: '型式', unit: '', defaultVal: '' },
   { name: '口径', unit: 'A', defaultVal: '50' },
   { name: '出力', unit: 'kW', defaultVal: '7.5' },
-  { name: '流量', unit: 'm³/h', defaultVal: '30' },
+  { name: '流量', unit: 'm³/min', defaultVal: '30' },
   { name: '全揚程', unit: 'm', defaultVal: '25' },
   { name: '材質', unit: '', defaultVal: 'SUS304' },
   { name: '耐圧', unit: 'MPa', defaultVal: '1.0' },
@@ -553,7 +554,7 @@ export const ItemCreateModal: React.FC<ItemCreateModalProps> = ({
                         <td className="py-2 px-3">
                           <input
                             type="text"
-                            placeholder="例: A, kW, m³/h (単位なしは空欄)"
+                            placeholder="例: A, kW, m³/min (単位なしは空欄)"
                             value={sp.unit}
                             onChange={(e) => handleUpdateSpecRow(sp.id, { unit: e.target.value })}
                             className="w-full border border-slate-200 rounded px-2 py-1 text-xs font-mono text-slate-600 focus:border-indigo-500 focus:outline-hidden"
