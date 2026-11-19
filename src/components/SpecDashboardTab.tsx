@@ -1277,133 +1277,162 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
         </div>
       </div>
 
-      {/* Revision Mode: Saved Specification Ledger Picker */}
+      {/* Revision Mode: Saved Specification Ledger Picker (Compact Scrollable List) */}
       {mode === 'revision' && (
-        <div className="bg-white border border-rose-200 rounded-xl p-4 shadow-2xs space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-rose-100 pb-2.5">
-            <div>
-              <h2 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                <GitBranch className="w-4 h-4 text-rose-600" />
-                <span>発行済み仕様書台帳から選択（保管タイトル：機器番号）</span>
-                <span className="text-[10px] font-mono bg-rose-50 text-rose-800 border border-rose-200 px-1.5 py-0.2 rounded">
-                  {ledgerRecords.length}件登録済
-                </span>
+        <div className="bg-white border border-rose-200 rounded-xl p-3.5 shadow-2xs space-y-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+              <GitBranch className="w-4 h-4 text-rose-600 shrink-0" />
+              <h2 className="text-xs font-bold text-slate-900 whitespace-nowrap">
+                発行済み仕様書台帳から選択
               </h2>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                選択するとテンプレート・複数機器（1〜4種類目）・前版の転記内容がすべて自動復元されます。
-              </p>
+              <span className="text-[10px] font-mono text-slate-400 whitespace-nowrap">
+                ({ledgerRecords.length}件)
+              </span>
+              <span className="text-[11px] text-slate-500 hidden md:inline">
+                — 選択でテンプレート・複数機器・前版内容を自動復元
+              </span>
             </div>
 
             {ledgerRecords.length > 0 && (
-              <div className="relative w-full sm:w-64">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
+              <div className="relative w-full sm:w-64 shrink-0">
+                <Search className="w-3 h-3 text-slate-400 absolute left-2.5 top-2" />
                 <input
                   type="text"
                   value={ledgerSearch}
                   onChange={(e) => setLedgerSearch(e.target.value)}
-                  placeholder="機器番号 (03-001等) や仕様書番号で絞込"
-                  className="w-full text-xs bg-slate-50 border border-slate-300 rounded-lg pl-8 pr-2.5 py-1.5 focus:bg-white focus:border-rose-500 focus:outline-hidden"
+                  placeholder="機器番号・仕様書番号・テンプレートで絞込..."
+                  className="w-full text-[11px] bg-slate-50 border border-slate-200 rounded-md pl-7 pr-2.5 py-1 focus:bg-white focus:border-rose-500 focus:outline-hidden"
                 />
               </div>
             )}
           </div>
 
           {ledgerRecords.length === 0 ? (
-            <div className="py-8 px-4 text-center bg-slate-50 border border-dashed border-slate-300 rounded-xl space-y-2">
-              <History className="w-7 h-7 text-slate-300 mx-auto" />
+            <div className="py-5 px-4 text-center bg-slate-50 border border-dashed border-slate-300 rounded-lg space-y-1">
               <div className="text-xs font-bold text-slate-700">
                 この案件の発行済み仕様書がまだ台帳に登録されていません
               </div>
               <p className="text-[11px] text-slate-500">
-                「仕様書作成 (初版)」タブで仕様書を「確定」するか、上部の「既存台帳読込」から他担当者の発行台帳JSONを読み込んでください。
+                「仕様書作成」タブで仕様書を「確定」するか、上部の「既存台帳読込」から発行台帳JSONを読み込んでください。
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-56 overflow-y-auto pr-1">
-              {filteredLedgerRecords.map((rec) => {
-                const isActive = rec.id === activeRecordId;
-                const isConfirmDelete = deleteConfirmRecordId === rec.id;
-                return (
-                  <div
-                    key={rec.id}
-                    onClick={() => handleSelectLedgerRecord(rec)}
-                    className={`p-3 rounded-xl border text-xs transition-all cursor-pointer flex flex-col justify-between gap-2 ${
-                      isActive
-                        ? 'bg-rose-50/90 border-rose-400 ring-1 ring-rose-300 shadow-xs'
-                        : 'bg-white border-slate-200 hover:border-rose-300 hover:bg-rose-50/20'
-                    }`}
-                  >
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between gap-1.5">
-                        <span className="font-mono font-bold text-sm text-slate-900 truncate">
+            <div className="max-h-36 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-lg bg-white">
+              {filteredLedgerRecords.length === 0 ? (
+                <div className="p-2.5 text-[11px] text-slate-400 text-center">
+                  条件に一致する発行済み仕様書がありません
+                </div>
+              ) : (
+                filteredLedgerRecords.map((rec) => {
+                  const isActive = rec.id === activeRecordId;
+                  const isConfirmDelete = deleteConfirmRecordId === rec.id;
+                  const fileTooltip =
+                    rec.templateExcelFileName || rec.templateMappingFileName
+                      ? `${rec.templateName} (Excel: ${rec.templateExcelFileName || '-'} / JSON: ${rec.templateMappingFileName || '-'})`
+                      : rec.templateName;
+                  return (
+                    <div
+                      key={rec.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => handleSelectLedgerRecord(rec)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handleSelectLedgerRecord(rec);
+                        }
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 text-xs flex items-center justify-between gap-2.5 transition-colors cursor-pointer ${
+                        isActive
+                          ? 'bg-rose-50/90 text-rose-950 font-semibold'
+                          : 'bg-white text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <span
+                          className={`w-2 h-2 rounded-full shrink-0 ${
+                            isActive ? 'bg-rose-600' : 'bg-slate-300'
+                          }`}
+                        />
+                        <span className="font-mono font-bold text-slate-900 shrink-0 whitespace-nowrap">
                           {rec.title}
                         </span>
-                        <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded shrink-0 ${
-                          rec.currentRevision === 0
-                            ? 'bg-slate-100 text-slate-700'
-                            : 'bg-rose-600 text-white'
-                        }`}>
-                          現在 Rev.{rec.currentRevision}
+                        <span
+                          className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded shrink-0 whitespace-nowrap ${
+                            rec.currentRevision === 0
+                              ? 'bg-slate-100 text-slate-700'
+                              : 'bg-rose-600 text-white'
+                          }`}
+                        >
+                          Rev.{rec.currentRevision}
+                        </span>
+                        <span className="font-mono text-[11px] text-indigo-700 shrink-0 whitespace-nowrap hidden sm:inline">
+                          {rec.docNo || '-'}
+                        </span>
+                        <span className="text-[11px] text-slate-500 truncate">
+                          {rec.itemNames.join(' / ')} ({rec.orderedItemIds.length}点)
                         </span>
                       </div>
-                      <div className="text-[11px] font-mono text-indigo-700 truncate">
-                        仕様書番号: {rec.docNo || '-'}
-                      </div>
-                      <div className="text-[11px] text-slate-600 truncate">
-                        {rec.itemNames.join(' / ')} ({rec.orderedItemIds.length}点)
-                      </div>
-                    </div>
 
-                    <div className="pt-1.5 border-t border-slate-100 space-y-1 text-[10px] text-slate-400">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate font-medium text-slate-600" title={rec.templateName}>
+                      <div className="flex items-center gap-2 shrink-0 text-[10px] text-slate-400">
+                        <span
+                          className="truncate max-w-[150px] hidden md:inline text-slate-500"
+                          title={fileTooltip}
+                        >
                           {rec.templateName}
                         </span>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <span className="font-mono">{rec.updatedAt.slice(0, 10)}</span>
-                          {onDeleteLedgerRecord && !isConfirmDelete && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDeleteConfirmRecordId(rec.id);
-                              }}
-                              className="p-0.5 text-slate-400 hover:text-red-600 rounded cursor-pointer"
-                              title="台帳から削除"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          )}
-                          {isConfirmDelete && onDeleteLedgerRecord && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onDeleteLedgerRecord(rec.id);
-                                setDeleteConfirmRecordId(null);
-                                if (activeRecordId === rec.id) {
-                                  setActiveRecordId('');
-                                  setLoadedSnapshot(null);
-                                }
-                              }}
-                              className="px-1.5 py-0.5 bg-red-600 text-white rounded text-[10px] font-bold cursor-pointer"
-                            >
-                              削除確定
-                            </button>
-                          )}
-                        </div>
+                        <span className="font-mono whitespace-nowrap">{rec.updatedAt.slice(0, 10)}</span>
+                        {onDeleteLedgerRecord && !isConfirmDelete && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteConfirmRecordId(rec.id);
+                            }}
+                            className="p-0.5 text-slate-400 hover:text-red-600 rounded cursor-pointer"
+                            title="台帳から削除"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
+                        {isConfirmDelete && onDeleteLedgerRecord && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteLedgerRecord(rec.id);
+                              setDeleteConfirmRecordId(null);
+                              if (activeRecordId === rec.id) {
+                                setActiveRecordId('');
+                                setLoadedSnapshot(null);
+                              }
+                            }}
+                            className="px-1.5 py-0.5 bg-red-600 text-white rounded text-[10px] font-bold cursor-pointer whitespace-nowrap"
+                          >
+                            削除確定
+                          </button>
+                        )}
                       </div>
-                      {(rec.templateExcelFileName || rec.templateMappingFileName) && (
-                        <div className="font-mono text-[10px] text-slate-400 truncate" title={`雛形: ${rec.templateExcelFileName || '-'} / JSON: ${rec.templateMappingFileName || '-'}`}>
-                          {rec.templateExcelFileName ? `Excel: ${rec.templateExcelFileName}` : ''}
-                          {rec.templateExcelFileName && rec.templateMappingFileName ? ' · ' : ''}
-                          {rec.templateMappingFileName ? `JSON: ${rec.templateMappingFileName}` : ''}
-                        </div>
-                      )}
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {activeLedgerRecord && (
+            <div className="text-[10px] font-mono text-slate-500 flex items-center justify-between gap-2 px-0.5 flex-wrap">
+              <span className="truncate">
+                選択中: <strong className="text-slate-800">{activeLedgerRecord.title}</strong> ({activeLedgerRecord.docNo || '-'}) · テンプレート: {activeLedgerRecord.templateName}
+              </span>
+              {(activeLedgerRecord.templateExcelFileName || activeLedgerRecord.templateMappingFileName) && (
+                <span className="truncate text-slate-400">
+                  {activeLedgerRecord.templateExcelFileName ? `Excel: ${activeLedgerRecord.templateExcelFileName}` : ''}
+                  {activeLedgerRecord.templateExcelFileName && activeLedgerRecord.templateMappingFileName ? ' · ' : ''}
+                  {activeLedgerRecord.templateMappingFileName ? `JSON: ${activeLedgerRecord.templateMappingFileName}` : ''}
+                </span>
+              )}
             </div>
           )}
 

@@ -674,7 +674,7 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
                     ? '仕様書発行台帳JSON 紐づけ維持中（アクセス許可の再開待ち）'
                     : currentProject.linkedLedgerFileName
                     ? '仕様書発行台帳JSONと連動中 (機器DBと分離管理)'
-                    : '仕様書発行台帳JSONが未紐づけです（初回は無から新規作成できます）'}
+                    : '仕様書発行台帳JSONが未紐づけです'}
                 </span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded font-mono bg-white/80 border border-slate-200 text-slate-700 font-bold">
                   発行履歴: {ledgerRecordsCount}件
@@ -792,7 +792,7 @@ export const ProjectSummaryTab: React.FC<ProjectSummaryTabProps> = ({
                   title="空の仕様書発行台帳JSONを新規作成して紐づけます"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span>新規台帳JSONを作成（無から作成）</span>
+                  <span>新規台帳JSONを作成</span>
                 </button>
                 <button
                   type="button"
