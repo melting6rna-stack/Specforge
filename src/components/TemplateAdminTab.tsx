@@ -453,6 +453,21 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
     });
   };
 
+  const handleClearAllCellAddresses = () => {
+    if (!editingTemplate) return;
+    setEditingTemplate({
+      ...editingTemplate,
+      fields: (editingTemplate.fields || []).map(f => ({
+        ...f,
+        cell: '',
+        cellSlot2: '',
+        cellSlot3: '',
+        cellSlot4: '',
+        ...(f.type === 'checkbox' || f.group === 'check' ? { labelCell: '' } : {})
+      }))
+    });
+  };
+
   const filteredTemplates = React.useMemo(() => {
     const q = templateFilter.trim().toLowerCase();
     if (!q) return templates;
@@ -854,13 +869,23 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                   </div>
 
                   {isEditing && (
-                    <button
-                      onClick={handleAddSpecField}
-                      className="px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md shadow-xs flex items-center gap-1 transition-all cursor-pointer shrink-0"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>仕様項目を追加</span>
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleClearAllCellAddresses}
+                        className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-red-50 hover:text-red-700 hover:border-red-300 border border-slate-300 rounded-md transition-all cursor-pointer"
+                        title="このテンプレートの全セル番地を空欄にリセット"
+                      >
+                        セル番地をすべてクリア
+                      </button>
+                      <button
+                        onClick={handleAddSpecField}
+                        className="px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md shadow-xs flex items-center gap-1 transition-all cursor-pointer shrink-0"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>仕様項目を追加</span>
+                      </button>
+                    </div>
                   )}
                 </div>
 
@@ -927,7 +952,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                                 value={field.cell || ''}
                                 onChange={(e) => handleUpdateField(field.id, { cell: e.target.value.toUpperCase() })}
                                 className="w-full text-xs font-mono font-bold bg-white border border-indigo-300 rounded px-2 py-1 text-indigo-800 placeholder-slate-300"
-                                placeholder="C15"
+                                placeholder="未指定"
                                 title="1種類目のセル番地"
                               />
                             </td>
@@ -937,7 +962,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                                 value={field.cellSlot2 || ''}
                                 onChange={(e) => handleUpdateField(field.id, { cellSlot2: e.target.value.toUpperCase() })}
                                 className="w-full text-xs font-mono bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 placeholder-slate-300"
-                                placeholder="C16"
+                                placeholder="未指定"
                                 title="2種類目のセル番地"
                               />
                             </td>
@@ -947,7 +972,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                                 value={field.cellSlot3 || ''}
                                 onChange={(e) => handleUpdateField(field.id, { cellSlot3: e.target.value.toUpperCase() })}
                                 className="w-full text-xs font-mono bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 placeholder-slate-300"
-                                placeholder="C17"
+                                placeholder="未指定"
                                 title="3種類目のセル番地"
                               />
                             </td>
@@ -957,7 +982,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                                 value={field.cellSlot4 || ''}
                                 onChange={(e) => handleUpdateField(field.id, { cellSlot4: e.target.value.toUpperCase() })}
                                 className="w-full text-xs font-mono bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 placeholder-slate-300"
-                                placeholder="C18"
+                                placeholder="未指定"
                                 title="4種類目のセル番地"
                               />
                             </td>
@@ -1027,7 +1052,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                                 value={field.cell || ''}
                                 onChange={(e) => handleUpdateField(field.id, { cell: e.target.value.toUpperCase() })}
                                 className="w-full text-xs font-mono font-bold bg-white border border-indigo-300 rounded px-2 py-1 text-indigo-800 placeholder-slate-300"
-                                placeholder="D15"
+                                placeholder="未指定"
                                 title="1種類目のセル番地"
                               />
                             </td>
@@ -1038,7 +1063,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                                 value={field.cellSlot2 || ''}
                                 onChange={(e) => handleUpdateField(field.id, { cellSlot2: e.target.value.toUpperCase() })}
                                 className="w-full text-xs font-mono bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 placeholder-slate-300"
-                                placeholder="D16"
+                                placeholder="未指定"
                                 title="2種類目のセル番地"
                               />
                             </td>
@@ -1049,7 +1074,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                                 value={field.cellSlot3 || ''}
                                 onChange={(e) => handleUpdateField(field.id, { cellSlot3: e.target.value.toUpperCase() })}
                                 className="w-full text-xs font-mono bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 placeholder-slate-300"
-                                placeholder="D17"
+                                placeholder="未指定"
                                 title="3種類目のセル番地"
                               />
                             </td>
@@ -1060,7 +1085,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                                 value={field.cellSlot4 || ''}
                                 onChange={(e) => handleUpdateField(field.id, { cellSlot4: e.target.value.toUpperCase() })}
                                 className="w-full text-xs font-mono bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 placeholder-slate-300"
-                                placeholder="D18"
+                                placeholder="未指定"
                                 title="4種類目のセル番地"
                               />
                             </td>
@@ -1170,8 +1195,8 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                                 type="text"
                                 value={field.cell}
                                 onChange={(e) => handleUpdateField(field.id, { cell: e.target.value.toUpperCase() })}
-                                className="w-full text-xs font-mono font-bold bg-white border border-emerald-300 rounded px-2 py-1 text-emerald-800"
-                                placeholder="例: C8"
+                                className="w-full text-xs font-mono font-bold bg-white border border-emerald-300 rounded px-2 py-1 text-emerald-800 placeholder-slate-300"
+                                placeholder="未指定"
                               />
                             </td>
                             <td className="p-2">
@@ -1179,8 +1204,8 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                                 type="text"
                                 value={field.labelCell || ''}
                                 onChange={(e) => handleUpdateField(field.id, { labelCell: e.target.value.toUpperCase() })}
-                                className="w-full text-xs font-mono font-bold bg-white border border-indigo-300 rounded px-2 py-1 text-indigo-800"
-                                placeholder="例: B8"
+                                className="w-full text-xs font-mono font-bold bg-white border border-indigo-300 rounded px-2 py-1 text-indigo-800 placeholder-slate-300"
+                                placeholder="未指定"
                               />
                             </td>
                             <td className="p-2">
@@ -1285,8 +1310,8 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                                 type="text"
                                 value={field.cell}
                                 onChange={(e) => handleUpdateField(field.id, { cell: e.target.value.toUpperCase() })}
-                                className="w-32 text-xs font-mono font-bold bg-white border border-indigo-300 rounded px-2.5 py-1 text-indigo-800 focus:ring-1 focus:ring-indigo-500 focus:outline-hidden"
-                                placeholder="例: C3"
+                                className="w-32 text-xs font-mono font-bold bg-white border border-indigo-300 rounded px-2.5 py-1 text-indigo-800 placeholder-slate-300 focus:ring-1 focus:ring-indigo-500 focus:outline-hidden"
+                                placeholder="未指定"
                               />
                             ) : (
                               <span className="font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded">
@@ -1357,13 +1382,13 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
                               return (
                                 <td key={def.id} className="p-2.5">
                                   {isEditing ? (
-                                    <input
-                                      type="text"
-                                      value={cellVal}
-                                      onChange={(e) => handleUpdateField(def.id, { cell: e.target.value.toUpperCase() })}
-                                      className="w-24 text-xs font-mono font-bold bg-white border border-rose-300 rounded px-2 py-1 text-rose-900 focus:ring-1 focus:ring-rose-500 focus:outline-hidden placeholder-slate-300"
-                                      placeholder={`例: ${def.builtinCell}`}
-                                    />
+                                      <input
+                                        type="text"
+                                        value={cellVal}
+                                        onChange={(e) => handleUpdateField(def.id, { cell: e.target.value.toUpperCase() })}
+                                        className="w-24 text-xs font-mono font-bold bg-white border border-rose-300 rounded px-2 py-1 text-rose-900 focus:ring-1 focus:ring-rose-500 focus:outline-hidden placeholder-slate-300"
+                                        placeholder="未指定"
+                                      />
                                   ) : (
                                     <span className={`font-mono font-bold px-2 py-0.5 rounded border ${
                                       cellVal

@@ -930,6 +930,19 @@ export async function renderSpecificationExcelGrid(
   const isValidCellAddr = (addr?: string): addr is string =>
     typeof addr === 'string' && /^[A-Z]{1,3}[0-9]{1,5}$/.test(addr.trim().toUpperCase());
 
+  const registerMappedCell = (addr: string, info: { id: string; label: string }) => {
+    const clean = addr.trim().toUpperCase();
+    fieldMappingMap[clean] = info;
+    try {
+      const masterAddr = worksheet.getCell(clean).master?.address;
+      if (masterAddr) {
+        fieldMappingMap[masterAddr.toUpperCase()] = info;
+      }
+    } catch {
+      // ignore
+    }
+  };
+
   for (const field of fields) {
     if (field.group === 'revision') continue;
     if (isValidCellAddr(field.cell)) {
@@ -939,7 +952,7 @@ export async function renderSpecificationExcelGrid(
         const refText = extractCellDisplayText(worksheet.getCell(field.labelCell.trim().toUpperCase()));
         if (refText) effectiveLabel = refText;
       }
-      fieldMappingMap[cleanAddr] = { id: field.id, label: effectiveLabel };
+      registerMappedCell(cleanAddr, { id: field.id, label: effectiveLabel });
 
       const cell = worksheet.getCell(cleanAddr);
       const rawVal = formValues[field.id];
@@ -961,7 +974,7 @@ export async function renderSpecificationExcelGrid(
     // Slot 2 (2種類目)
     if (isValidCellAddr(field.cellSlot2)) {
       const addr2 = field.cellSlot2.trim().toUpperCase();
-      fieldMappingMap[addr2] = { id: `${field.id}__slot2`, label: `${field.label} (2種類目)` };
+      registerMappedCell(addr2, { id: `${field.id}__slot2`, label: `${field.label} (2種類目)` });
       const key2 = `${field.id}__slot2`;
       const val2 = formValues[key2] !== undefined ? formValues[key2] : getItemVal(items[1], field.label);
       if (val2 !== undefined && val2 !== null && val2 !== '') {
@@ -971,7 +984,7 @@ export async function renderSpecificationExcelGrid(
     // Slot 3 (3種類目)
     if (isValidCellAddr(field.cellSlot3)) {
       const addr3 = field.cellSlot3.trim().toUpperCase();
-      fieldMappingMap[addr3] = { id: `${field.id}__slot3`, label: `${field.label} (3種類目)` };
+      registerMappedCell(addr3, { id: `${field.id}__slot3`, label: `${field.label} (3種類目)` });
       const key3 = `${field.id}__slot3`;
       const val3 = formValues[key3] !== undefined ? formValues[key3] : getItemVal(items[2], field.label);
       if (val3 !== undefined && val3 !== null && val3 !== '') {
@@ -981,7 +994,7 @@ export async function renderSpecificationExcelGrid(
     // Slot 4 (4種類目)
     if (isValidCellAddr(field.cellSlot4)) {
       const addr4 = field.cellSlot4.trim().toUpperCase();
-      fieldMappingMap[addr4] = { id: `${field.id}__slot4`, label: `${field.label} (4種類目)` };
+      registerMappedCell(addr4, { id: `${field.id}__slot4`, label: `${field.label} (4種類目)` });
       const key4 = `${field.id}__slot4`;
       const val4 = formValues[key4] !== undefined ? formValues[key4] : getItemVal(items[3], field.label);
       if (val4 !== undefined && val4 !== null && val4 !== '') {

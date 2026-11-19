@@ -705,7 +705,15 @@ export default function App() {
       templateFolderHandleRef.current = handle;
 
       if (cached && cached.templates.length > 0) {
-        setFolderTemplates(cached.templates.map(normalizeSpecTemplate));
+        const cleanedCached = cached.templates.map(normalizeSpecTemplate);
+        setFolderTemplates(cleanedCached);
+        if (cached.cacheSchemaVersion !== 2) {
+          await saveCachedFolderTemplates({
+            ...cached,
+            cacheSchemaVersion: 2,
+            templates: cleanedCached,
+          });
+        }
       }
 
       if (handle) {

@@ -15,6 +15,7 @@ export interface FolderScanStats {
 }
 
 export interface CachedTemplateFolderPayload {
+  cacheSchemaVersion?: number;
   folderName: string;
   mode: 'handle' | 'upload_cache';
   lastSyncAt: string;
@@ -84,7 +85,7 @@ export async function saveCachedFolderTemplates(payload: CachedTemplateFolderPay
     const db = await openHandleDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction('handles', 'readwrite');
-      tx.objectStore('handles').put(payload, FOLDER_CACHE_KEY);
+      tx.objectStore('handles').put({ ...payload, cacheSchemaVersion: 2 }, FOLDER_CACHE_KEY);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
