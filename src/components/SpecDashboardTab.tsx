@@ -1705,13 +1705,15 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                 <label className="text-[11px] font-semibold text-slate-700 flex items-center gap-1">
                   <Lock className="w-3 h-3 text-slate-400" />
                   <span>仕様書番号</span>
-                  <span
-                    className="font-mono text-[9px] bg-slate-100 text-slate-600 px-1 py-0.5 rounded cursor-pointer hover:bg-indigo-100 hover:text-indigo-700"
-                    onClick={() => setSelectedCellAddress((docNoField?.cell || 'C4').toUpperCase())}
-                    title="Excelセルへジャンプ"
-                  >
-                    {docNoField?.cell || 'C4'}
-                  </span>
+                  {docNoField?.cell?.trim() && (
+                    <span
+                      className="font-mono text-[9px] bg-slate-100 text-slate-600 px-1 py-0.5 rounded cursor-pointer hover:bg-indigo-100 hover:text-indigo-700"
+                      onClick={() => setSelectedCellAddress(docNoField.cell.trim().toUpperCase())}
+                      title="Excelセルへジャンプ"
+                    >
+                      {docNoField.cell.trim().toUpperCase()}
+                    </span>
+                  )}
                 </label>
                 <span className="text-[10px] text-slate-400 font-mono">客先コード・機器番号連動</span>
               </div>
@@ -1720,7 +1722,9 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
                 value={formValues['f-docno'] || fixedDocNo}
                 onFocus={() => {
                   setFocusedFieldId('f-docno');
-                  setSelectedCellAddress((docNoField?.cell || 'C4').toUpperCase());
+                  if (docNoField?.cell?.trim()) {
+                    setSelectedCellAddress(docNoField.cell.trim().toUpperCase());
+                  }
                 }}
                 onChange={(e) => handleFieldChange('f-docno', e.target.value)}
                 className="w-full text-xs font-mono font-bold bg-white border border-slate-300 rounded px-2.5 py-1.5 text-indigo-900 focus:border-indigo-500 focus:outline-hidden"
@@ -2329,12 +2333,14 @@ export const SpecDashboardTab: React.FC<SpecDashboardTabProps> = ({
             <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs space-y-2">
               <h2 className="text-xs font-bold text-slate-900 border-b border-slate-100 pb-2 flex items-center justify-between">
                 <span>📝 特記事項・指示事項</span>
-                <span
-                  className="font-mono text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded cursor-pointer hover:bg-indigo-100 hover:text-indigo-700"
-                  onClick={() => setSelectedCellAddress('B23')}
-                >
-                  セル B23
-                </span>
+                {noteFields[0]?.cell?.trim() && (
+                  <span
+                    className="font-mono text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded cursor-pointer hover:bg-indigo-100 hover:text-indigo-700"
+                    onClick={() => setSelectedCellAddress(noteFields[0].cell.trim().toUpperCase())}
+                  >
+                    セル {noteFields[0].cell.trim().toUpperCase()}
+                  </span>
+                )}
               </h2>
               {noteFields.map((f) => (
                 <div key={f.id} className="space-y-1">

@@ -130,17 +130,7 @@ export function exportEquipmentSpecToExcel(
       const ws = wb.Sheets[targetSheetName];
 
       if (ws) {
-        // 1. Inject Exact Single Cell Mappings (e.g. E30: notes, C3: title, etc.)
-        if (template.cellMappings && template.cellMappings.length > 0) {
-          for (const mapping of template.cellMappings) {
-            if (mapping.cell && mapping.fieldKey) {
-              const val = resolveMappedValue(mapping.fieldKey, specData, items);
-              setCellValue(ws, mapping.cell, val);
-            }
-          }
-        }
-
-        // 2. Inject Individual Detail Field Mappings (機器名, 数量, 納期, 特記事項)
+        // 1. Inject Individual Detail Field Mappings (機器名, 数量, 納期, 特記事項)
         if (template.fields && template.fields.length > 0) {
           const detailFields = template.fields.filter(f => f.group === 'detail');
           for (const f of detailFields) {

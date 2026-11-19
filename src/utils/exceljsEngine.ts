@@ -471,9 +471,12 @@ export async function fillSpecificationExcel(
   // 1. INJECT SPEC & DETAIL FIELD MAPPINGS (Individual 1〜4 slot cell mappings)
   const fields: SpecFieldMapping[] = normalizedTpl.fields || [];
 
+  const isValidCellAddr = (addr?: string): addr is string =>
+    typeof addr === 'string' && /^[A-Z]{1,3}[0-9]{1,5}$/.test(addr.trim().toUpperCase());
+
   for (const field of fields) {
     if (field.group === 'revision') continue;
-    if (field.cell && field.cell.trim()) {
+    if (isValidCellAddr(field.cell)) {
       const cellAddr = field.cell.trim().toUpperCase();
       const cell = worksheet.getCell(cellAddr);
       const rawVal = formValues[field.id];
@@ -495,7 +498,7 @@ export async function fillSpecificationExcel(
     }
 
     // Slot 2 (2種類目)
-    if (field.cellSlot2 && field.cellSlot2.trim()) {
+    if (isValidCellAddr(field.cellSlot2)) {
       const addr2 = field.cellSlot2.trim().toUpperCase();
       const key2 = `${field.id}__slot2`;
       const val2 = formValues[key2] !== undefined ? formValues[key2] : getItemValByLabel(items[1], field.label);
@@ -504,7 +507,7 @@ export async function fillSpecificationExcel(
       }
     }
     // Slot 3 (3種類目)
-    if (field.cellSlot3 && field.cellSlot3.trim()) {
+    if (isValidCellAddr(field.cellSlot3)) {
       const addr3 = field.cellSlot3.trim().toUpperCase();
       const key3 = `${field.id}__slot3`;
       const val3 = formValues[key3] !== undefined ? formValues[key3] : getItemValByLabel(items[2], field.label);
@@ -513,24 +516,12 @@ export async function fillSpecificationExcel(
       }
     }
     // Slot 4 (4種類目)
-    if (field.cellSlot4 && field.cellSlot4.trim()) {
+    if (isValidCellAddr(field.cellSlot4)) {
       const addr4 = field.cellSlot4.trim().toUpperCase();
       const key4 = `${field.id}__slot4`;
       const val4 = formValues[key4] !== undefined ? formValues[key4] : getItemValByLabel(items[3], field.label);
       if (val4 !== undefined && val4 !== null && val4 !== '') {
         worksheet.getCell(addr4).value = String(val4);
-      }
-    }
-  }
-
-  // 2. INJECT LEGACY / BASELINE DOCUMENT CELL MAPPINGS (e.g. E30: notes, C3: title, etc.)
-  if (template.cellMappings && template.cellMappings.length > 0) {
-    for (const cm of template.cellMappings) {
-      if (!cm.cell || !cm.fieldKey) continue;
-      const cell = worksheet.getCell(cm.cell.trim().toUpperCase());
-      const val = docInfo[cm.fieldKey];
-      if (val !== undefined && val !== null) {
-        cell.value = val;
       }
     }
   }
@@ -936,9 +927,12 @@ export async function renderSpecificationExcelGrid(
   // 1. Inject Fields (including 4-slot detail & spec mappings)
   const fields = normalizedTpl.fields || [];
   const fieldMappingMap: Record<string, { id: string; label: string }> = {};
+  const isValidCellAddr = (addr?: string): addr is string =>
+    typeof addr === 'string' && /^[A-Z]{1,3}[0-9]{1,5}$/.test(addr.trim().toUpperCase());
+
   for (const field of fields) {
     if (field.group === 'revision') continue;
-    if (field.cell && field.cell.trim()) {
+    if (isValidCellAddr(field.cell)) {
       const cleanAddr = field.cell.trim().toUpperCase();
       let effectiveLabel = field.label;
       if (field.type === 'checkbox' && field.labelCell && /^[A-Z]{1,3}[0-9]{1,5}$/.test(field.labelCell.trim().toUpperCase())) {
@@ -965,7 +959,7 @@ export async function renderSpecificationExcelGrid(
     }
 
     // Slot 2 (2種類目)
-    if (field.cellSlot2 && field.cellSlot2.trim()) {
+    if (isValidCellAddr(field.cellSlot2)) {
       const addr2 = field.cellSlot2.trim().toUpperCase();
       fieldMappingMap[addr2] = { id: `${field.id}__slot2`, label: `${field.label} (2種類目)` };
       const key2 = `${field.id}__slot2`;
@@ -975,7 +969,7 @@ export async function renderSpecificationExcelGrid(
       }
     }
     // Slot 3 (3種類目)
-    if (field.cellSlot3 && field.cellSlot3.trim()) {
+    if (isValidCellAddr(field.cellSlot3)) {
       const addr3 = field.cellSlot3.trim().toUpperCase();
       fieldMappingMap[addr3] = { id: `${field.id}__slot3`, label: `${field.label} (3種類目)` };
       const key3 = `${field.id}__slot3`;
@@ -985,29 +979,13 @@ export async function renderSpecificationExcelGrid(
       }
     }
     // Slot 4 (4種類目)
-    if (field.cellSlot4 && field.cellSlot4.trim()) {
+    if (isValidCellAddr(field.cellSlot4)) {
       const addr4 = field.cellSlot4.trim().toUpperCase();
       fieldMappingMap[addr4] = { id: `${field.id}__slot4`, label: `${field.label} (4種類目)` };
       const key4 = `${field.id}__slot4`;
       const val4 = formValues[key4] !== undefined ? formValues[key4] : getItemVal(items[3], field.label);
       if (val4 !== undefined && val4 !== null && val4 !== '') {
         worksheet.getCell(addr4).value = String(val4);
-      }
-    }
-  }
-
-  // 2. Inject Legacy Mappings
-  if (normalizedTpl.cellMappings) {
-    for (const cm of normalizedTpl.cellMappings) {
-      if (!cm.cell || !cm.fieldKey) continue;
-      const cleanAddr = cm.cell.trim().toUpperCase();
-      if (!fieldMappingMap[cleanAddr]) {
-        fieldMappingMap[cleanAddr] = { id: cm.fieldKey, label: cm.label || cm.fieldKey };
-      }
-      const cell = worksheet.getCell(cleanAddr);
-      const val = docInfo[cm.fieldKey];
-      if (val !== undefined && val !== null) {
-        cell.value = val;
       }
     }
   }
@@ -1297,10 +1275,13 @@ export function computeResolvedCellValues(
       .map((f) => f.cell.trim().toUpperCase())
   );
 
+  const isValidCellAddr = (addr?: string): addr is string =>
+    typeof addr === 'string' && /^[A-Z]{1,3}[0-9]{1,5}$/.test(addr.trim().toUpperCase());
+
   for (const field of fields) {
     if (field.group === 'revision') continue;
 
-    if (field.cell && field.cell.trim()) {
+    if (isValidCellAddr(field.cell)) {
       const addr1 = field.cell.trim().toUpperCase();
       const rawVal = formValues[field.id];
       if (field.type === 'checkbox') {
@@ -1319,33 +1300,23 @@ export function computeResolvedCellValues(
       }
     }
 
-    if (field.cellSlot2 && field.cellSlot2.trim()) {
+    if (isValidCellAddr(field.cellSlot2)) {
       const addr2 = field.cellSlot2.trim().toUpperCase();
       const key2 = `${field.id}__slot2`;
       const val2 = formValues[key2] !== undefined ? formValues[key2] : getItemVal(items[1], field.label);
       resolved[addr2] = val2 !== undefined && val2 !== null ? String(val2) : '';
     }
-    if (field.cellSlot3 && field.cellSlot3.trim()) {
+    if (isValidCellAddr(field.cellSlot3)) {
       const addr3 = field.cellSlot3.trim().toUpperCase();
       const key3 = `${field.id}__slot3`;
       const val3 = formValues[key3] !== undefined ? formValues[key3] : getItemVal(items[2], field.label);
       resolved[addr3] = val3 !== undefined && val3 !== null ? String(val3) : '';
     }
-    if (field.cellSlot4 && field.cellSlot4.trim()) {
+    if (isValidCellAddr(field.cellSlot4)) {
       const addr4 = field.cellSlot4.trim().toUpperCase();
       const key4 = `${field.id}__slot4`;
       const val4 = formValues[key4] !== undefined ? formValues[key4] : getItemVal(items[3], field.label);
       resolved[addr4] = val4 !== undefined && val4 !== null ? String(val4) : '';
-    }
-  }
-
-  if (normalizedTpl.cellMappings) {
-    for (const cm of normalizedTpl.cellMappings) {
-      if (!cm.cell || !cm.fieldKey) continue;
-      const addr = cm.cell.trim().toUpperCase();
-      if (!revCellSet.has(addr) && docInfo[cm.fieldKey] !== undefined && docInfo[cm.fieldKey] !== null) {
-        resolved[addr] = String(docInfo[cm.fieldKey]);
-      }
     }
   }
 

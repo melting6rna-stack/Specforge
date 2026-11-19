@@ -225,13 +225,9 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
       inspectionStandard: '受入検査を実施すること。',
       warrantyPeriod: '引渡日より1年間。',
       deliveryTerms: '車上渡し。',
-      notesTemplate: '特記事項なし。',
+      notesTemplate: '',
       sourceType: 'custom_excel',
-      fields: [
-        { id: `f-${Date.now()}-3`, label: '', cell: 'C8', labelCell: 'B8', type: 'checkbox', group: 'check', defaultValue: true, checkboxConfig: { checkedValue: '☑ 要', uncheckedValue: '☐ 不要', labelTrue: '要', labelFalse: '不要' } },
-        { id: `f-${Date.now()}-4`, label: '塗装仕様', cell: 'C9', type: 'select', group: 'spec', options: ['標準防錆塗装', 'エポキシ樹脂塗装', '無塗装'], defaultValue: '標準防錆塗装' },
-        { id: `f-${Date.now()}-5`, label: '特記事項', cell: 'B23', type: 'textarea', group: 'notes', defaultValue: '特記事項なし。' }
-      ],
+      fields: [],
       updatedAt: new Date().toISOString().slice(0, 10)
     });
 
@@ -340,7 +336,7 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
     const newField: SpecFieldMapping = {
       id: `f-spec-${Date.now()}`,
       label: labelChoice,
-      cell: 'C11',
+      cell: '',
       cellSlot2: '',
       cellSlot3: '',
       cellSlot4: '',
@@ -360,8 +356,8 @@ export const TemplateAdminTab: React.FC<TemplateAdminTabProps> = ({
     const newField: SpecFieldMapping = {
       id: `f-check-${Date.now()}`,
       label: '',
-      cell: 'C8',
-      labelCell: 'B8',
+      cell: '',
+      labelCell: '',
       type: 'checkbox',
       group: 'check',
       defaultValue: true,

@@ -136,7 +136,11 @@ const REVISION_ID_SET = new Set(REVISION_FIELD_DEFS.map(r => r.id));
 export function normalizeSpecTemplate(tpl: SpecTemplate): SpecTemplate {
   const existingFields: SpecFieldMapping[] = Array.isArray(tpl.fields) ? [...tpl.fields] : [];
   const startRow = tpl.tableMapping?.startRow || 15;
-  const usesBuiltinWorkbook = tpl.sourceType === 'preset' && !tpl.rawWorkbookBase64 && !tpl.masterWorkbookBase64;
+  const usesBuiltinWorkbook =
+    tpl.sourceType === 'preset' &&
+    !tpl.rawWorkbookBase64 &&
+    !tpl.masterWorkbookBase64 &&
+    tpl.sourceLocation !== 'folder';
 
   const basicFields: SpecFieldMapping[] = BASIC_FIELD_DEFS.map(def => {
     const existing = existingFields.find(f => {
@@ -151,7 +155,7 @@ export function normalizeSpecTemplate(tpl: SpecTemplate): SpecTemplate {
     return {
       id: def.id,
       label: def.label,
-      cell: existing?.cell !== undefined ? existing.cell : def.defaultCell,
+      cell: existing?.cell !== undefined ? existing.cell : (usesBuiltinWorkbook ? def.defaultCell : ''),
       type: def.type,
       group: 'basic',
       defaultValue: existing?.defaultValue ?? (def.type === 'date' ? new Date().toISOString().slice(0, 10) : ''),
@@ -182,6 +186,8 @@ export function normalizeSpecTemplate(tpl: SpecTemplate): SpecTemplate {
     return def.defaultCol;
   };
 
+  const shouldFillDefaultDetailCells = usesBuiltinWorkbook || Boolean(tpl.tableMapping);
+
   const detailFields: SpecFieldMapping[] = DETAIL_FIELD_DEFS.map(def => {
     const existing = existingFields.find(
       f => f.group === 'detail' && (f.id === def.id || f.label === def.label)
@@ -194,6 +200,21 @@ export function normalizeSpecTemplate(tpl: SpecTemplate): SpecTemplate {
         type: 'text',
         group: 'detail',
         description: existing.description || def.description
+      };
+    }
+
+    if (!shouldFillDefaultDetailCells) {
+      return {
+        id: def.id,
+        label: def.label,
+        cell: '',
+        cellSlot2: '',
+        cellSlot3: '',
+        cellSlot4: '',
+        type: 'text',
+        group: 'detail',
+        defaultValue: '',
+        description: def.description
       };
     }
 
@@ -222,7 +243,7 @@ export function normalizeSpecTemplate(tpl: SpecTemplate): SpecTemplate {
     return true;
   });
 
-  const { tableMapping: _removedTableMapping, ...rest } = tpl;
+  const { tableMapping: _removedTableMapping, cellMappings: _removedCellMappings, ...rest } = tpl;
 
   return {
     ...rest,
